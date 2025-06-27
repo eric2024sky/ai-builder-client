@@ -1,0 +1,179 @@
+/* ─── 전체 컨테이너 & 테마 ───────────────────────────────── */
+.ai-builder-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  transition: background 0.3s, color 0.3s;
+}
+.ai-builder-container.dark {
+  background: #1e1e2e;
+  color: #e0e0e0;
+}
+.ai-builder-container.light {
+  background: #f5f5f5;
+  color: #333;
+}
+
+/* ─── 테마 토글 스위치 ─────────────────────────────────── */
+.theme-toggle {
+  position: absolute;
+  top: 16px; left: 16px;
+  z-index: 20;
+}
+.theme-toggle input {
+  display: none;
+}
+.theme-toggle label {
+  width: 50px; height: 26px;
+  background: #ccc;
+  border-radius: 13px;
+  display: block;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+.theme-toggle label::after {
+  content: '';
+  width: 22px; height: 22px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px; left: 2px;
+  transition: transform 0.3s;
+}
+.theme-toggle input:checked + label {
+  background: #61dafb;
+}
+.theme-toggle input:checked + label::after {
+  transform: translateX(24px);
+}
+
+/* ─── 패널 공통 ───────────────────────────────────────── */
+.panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  overflow: hidden;
+  transition: background 0.3s, color 0.3s;
+}
+
+/* ─── 입력 패널 ───────────────────────────────────────── */
+.input-panel.dark {
+  background: #2a2a3e;
+}
+.input-panel.light {
+  background: #ffffff;
+}
+.title {
+  margin: 0 0 16px;
+  font-size: 1.8rem;
+  color: #61dafb;
+}
+.prompt-input {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 4px;
+  resize: none;
+  font-size: 1rem;
+  transition: background 0.3s, color 0.3s;
+}
+.input-panel.dark .prompt-input {
+  background: #3a3a4c;
+  color: #e0e0e0;
+}
+.input-panel.light .prompt-input {
+  background: #f0f0f0;
+  color: #333;
+}
+.prompt-input:focus {
+  outline: 2px solid #61dafb;
+}
+.btn-generate {
+  margin-top: 12px;
+  padding: 10px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.input-panel.dark .btn-generate {
+  background: #61dafb;
+  color: #1e1e2e;
+}
+.input-panel.light .btn-generate {
+  background: #007acc;
+  color: #fff;
+}
+.btn-generate:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-generate:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+.status {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: inherit;
+}
+
+/* ─── 리사이저 바 ─────────────────────────────────────── */
+.resizer-bar {
+  width: 8px;
+  background: transparent;
+  cursor: ew-resize;
+  position: relative;
+  z-index: 10;
+}
+/* 단 1px 중앙 가이드선만 hover 시 강조, 실제 크기는 절대 변경되지 않음 */
+.resizer-bar::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  width: 2px; height: 100%;
+  background: currentColor;
+  opacity: 0.1;
+  transform: translateX(-50%);
+  transition: opacity 0.2s;
+}
+.resizer-bar:hover::before {
+  opacity: 0.3;
+}
+
+/* ─── 프리뷰 패널 ─────────────────────────────────────── */
+.preview-panel.dark {
+  background: #171722;
+}
+.preview-panel.light {
+  background: #ffffff;
+}
+.preview-panel iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* ─── 로딩 스피너 ─────────────────────────────────────── */
+.spinner-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 15;
+}
+.spinner {
+  width: 48px; height: 48px;
+  border: 5px solid rgba(255,255,255,0.3);
+  border-top-color: #61dafb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
