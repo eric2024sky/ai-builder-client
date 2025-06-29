@@ -1,3 +1,251 @@
+/* ─── 작업 상태 패널 ──────────────────────────────── */
+.work-status-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(97, 218, 251, 0.3);
+}
+.ai-builder-container.dark .work-status-panel {
+  background: rgba(97, 218, 251, 0.05);
+}
+.ai-builder-container.light .work-status-panel {
+  background: rgba(0, 122, 204, 0.05);
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.status-header h3 {
+  margin: 0;
+  color: #61dafb;
+  font-size: 1rem;
+}
+
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+}
+.connection-indicator.connected {
+  color: #44c84a;
+  background: rgba(68, 200, 74, 0.1);
+}
+.connection-indicator.disconnected {
+  color: #6c757d;
+  background: rgba(108, 117, 125, 0.1);
+}
+.connection-indicator.error {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.1);
+}
+.connection-indicator.timeout {
+  color: #f39c12;
+  background: rgba(243, 156, 18, 0.1);
+}
+.connection-indicator.completed {
+  color: #28a745;
+  background: rgba(40, 167, 69, 0.1);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.current-work {
+  margin-bottom: 12px;
+}
+.work-text {
+  font-weight: bold;
+  color: #61dafb;
+  margin-bottom: 4px;
+}
+.last-activity {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.error-details {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 4px solid #dc3545;
+}
+.ai-builder-container.dark .error-details {
+  background: rgba(220, 53, 69, 0.1);
+}
+.ai-builder-container.light .error-details {
+  background: rgba(220, 53, 69, 0.05);
+}
+.error-message {
+  color: #dc3545;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+.error-suggestion {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.debug-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.btn-debug-toggle, .btn-clear-logs, .btn-test-connection {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  border: 1px solid rgba(97, 218, 251, 0.5);
+  border-radius: 4px;
+  background: transparent;
+  color: #61dafb;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-debug-toggle:hover, .btn-test-connection:hover {
+  background: rgba(97, 218, 251, 0.1);
+}
+.btn-test-connection {
+  border-color: rgba(40, 167, 69, 0.5);
+  color: #28a745;
+}
+.btn-test-connection:hover:not(:disabled) {
+  background: rgba(40, 167, 69, 0.1);
+}
+.btn-test-connection:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-clear-logs {
+  border-color: rgba(220, 53, 69, 0.5);
+  color: #dc3545;
+}
+.btn-clear-logs:hover {
+  background: rgba(220, 53, 69, 0.1);
+}
+
+.debug-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 12px;
+}
+.debug-header h4 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: #61dafb;
+}
+
+.debug-logs {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 8px;
+}
+.ai-builder-container.dark .debug-logs {
+  background: rgba(0, 0, 0, 0.2);
+}
+.ai-builder-container.light .debug-logs {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.debug-log {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 4px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+.debug-log.info {
+  border-left: 3px solid #61dafb;
+}
+.debug-log.success {
+  border-left: 3px solid #44c84a;
+}
+.debug-log.warning {
+  border-left: 3px solid #f39c12;
+}
+.debug-log.error {
+  border-left: 3px solid #dc3545;
+}
+
+.log-time {
+  color: #6c757d;
+  min-width: 60px;
+  font-family: monospace;
+}
+.log-type {
+  min-width: 60px;
+  font-weight: bold;
+}
+.log-type:contains("INFO") { color: #61dafb; }
+.log-type:contains("SUCCESS") { color: #44c84a; }
+.log-type:contains("WARNING") { color: #f39c12; }
+.log-type:contains("ERROR") { color: #dc3545; }
+
+.log-message {
+  flex: 1;
+}
+.log-data {
+  margin-top: 4px;
+  width: 100%;
+}
+.log-data summary {
+  cursor: pointer;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.log-data pre {
+  margin: 4px 0 0;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+  font-size: 0.7rem;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.no-logs {
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+  padding: 20px;
+}
+
+/* 디버그 로그 스크롤바 */
+.debug-logs::-webkit-scrollbar {
+  width: 4px;
+}
+.debug-logs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.debug-logs::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 2px;
+}
+
+/* ─── 계층적 생성 진행 상태 ────────────────────────── */
+  /* ai-builder-client/App.css */
+
 /* ─── 전체 컨테이너 & 테마 ───────────────────────────────── */
 .ai-builder-container {
   display: flex;
@@ -130,6 +378,100 @@
   outline: 2px solid #61dafb;
 }
 
+/* ─── 계층적 생성 진행 상태 ──────────────────────────── */
+.hierarchical-progress {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 2px solid #f39c12;
+}
+.ai-builder-container.dark .hierarchical-progress {
+  background: rgba(243, 156, 18, 0.1);
+}
+.ai-builder-container.light .hierarchical-progress {
+  background: rgba(243, 156, 18, 0.05);
+}
+
+.hierarchical-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.hierarchical-header h3 {
+  margin: 0;
+  color: #f39c12;
+  font-size: 1.1rem;
+}
+.layer-counter {
+  background: #f39c12;
+  color: #1e1e2e;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.layer-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.3s;
+}
+
+.layer-item.completed {
+  opacity: 0.7;
+}
+.ai-builder-container.dark .layer-item.completed {
+  background: rgba(68, 200, 74, 0.1);
+}
+.ai-builder-container.light .layer-item.completed {
+  background: rgba(40, 167, 69, 0.1);
+}
+
+.layer-item.current {
+  transform: scale(1.02);
+}
+.ai-builder-container.dark .layer-item.current {
+  background: rgba(243, 156, 18, 0.2);
+  border: 1px solid #f39c12;
+}
+.ai-builder-container.light .layer-item.current {
+  background: rgba(243, 156, 18, 0.15);
+  border: 1px solid #f39c12;
+}
+
+.layer-item.pending {
+  opacity: 0.5;
+}
+
+.layer-status {
+  font-size: 1.2rem;
+  min-width: 24px;
+  text-align: center;
+}
+
+.layer-info {
+  flex: 1;
+}
+.layer-name {
+  font-weight: bold;
+  margin-bottom: 2px;
+  color: #f39c12;
+}
+.layer-description {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
 /* ─── 채팅 기록 ────────────────────────────────────────── */
 .chat-history {
   flex: 1;
@@ -237,6 +579,13 @@
 .chat-time {
   font-size: 0.75rem;
 }
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 20px; /* 최소 높이 보장 */
+}
 .history-indicator {
   font-size: 0.75rem;
   padding: 2px 6px;
@@ -244,7 +593,36 @@
   background: rgba(255,255,255,0.1);
   color: #61dafb;
   font-weight: bold;
+  white-space: nowrap;
 }
+
+/* ─── 개별 다시 생성 버튼 스타일 ──────────────────────── */
+.btn-regenerate-specific {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  border: 1px solid #f39c12;
+  border-radius: 4px;
+  background: rgba(243, 156, 18, 0.1);
+  color: #f39c12;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.btn-regenerate-specific:hover:not(:disabled) {
+  background: #f39c12;
+  color: #1e1e2e;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3);
+}
+
+.btn-regenerate-specific:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .chat-content {
   font-size: 0.95rem;
   line-height: 1.4;
@@ -407,6 +785,8 @@
 .empty-preview-content {
   text-align: center;
   opacity: 0.6;
+  max-width: 400px;
+  padding: 20px;
 }
 .empty-preview-content h2 {
   margin: 0 0 16px;
@@ -415,6 +795,32 @@
 .empty-preview-content p {
   margin: 8px 0;
   font-size: 1.1rem;
+}
+
+/* ─── 기능 하이라이트 ──────────────────────────────── */
+.feature-highlight {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 8px;
+  text-align: left;
+}
+.ai-builder-container.dark .feature-highlight {
+  background: rgba(97, 218, 251, 0.1);
+  border: 1px solid rgba(97, 218, 251, 0.3);
+}
+.ai-builder-container.light .feature-highlight {
+  background: rgba(0, 122, 204, 0.1);
+  border: 1px solid rgba(0, 122, 204, 0.3);
+}
+.feature-highlight h3 {
+  margin: 0 0 12px;
+  color: #61dafb;
+  font-size: 1.2rem;
+}
+.feature-highlight p {
+  margin: 8px 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
 }
 
 /* ─── 로딩 스피너 ─────────────────────────────────────── */
@@ -441,6 +847,8 @@
   color: white;
   font-size: 1.1rem;
   font-weight: bold;
+  text-align: center;
+  max-width: 300px;
 }
 
 /* ─── 생성 진행률 표시 ─────────────────────────────────── */
@@ -466,8 +874,44 @@
   font-weight: 500;
 }
 
+/* ─── 디버깅 정보 ─────────────────────────────────────── */
+.debug-info {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 4px;
+}
+.ai-builder-container.dark .debug-info {
+  background: rgba(255,255,255,0.05);
+}
+.ai-builder-container.light .debug-info {
+  background: rgba(0,0,0,0.05);
+}
+
+.debug-info details {
+  margin-bottom: 8px;
+}
+.debug-info summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  opacity: 0.8;
+  padding: 4px 0;
+}
+.debug-info summary:hover {
+  opacity: 1;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ─── 계층적 생성 애니메이션 ────────────────────────── */
+@keyframes layerPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+.layer-item.current .layer-status {
+  animation: layerPulse 2s infinite;
 }
 
 /* ─── 반응형 디자인 ────────────────────────────────────── */
@@ -488,5 +932,39 @@
   }
   .preview-panel {
     height: 50vh;
+  }
+  
+  /* 모바일에서 계층적 생성 진행 상태 조정 */
+  .hierarchical-progress {
+    padding: 12px;
+  }
+  .hierarchical-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .layer-item {
+    padding: 6px;
+  }
+  .layer-status {
+    font-size: 1rem;
+  }
+  .layer-name {
+    font-size: 0.9rem;
+  }
+  .layer-description {
+    font-size: 0.8rem;
+  }
+  
+  /* 모바일에서 기능 하이라이트 조정 */
+  .feature-highlight {
+    padding: 12px;
+    margin-top: 16px;
+  }
+  .feature-highlight h3 {
+    font-size: 1.1rem;
+  }
+  .feature-highlight p {
+    font-size: 0.9rem;
   }
 }
