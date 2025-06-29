@@ -4,7 +4,8 @@ import './App.css';
 
 export default function App() {
   // ─── AI & 스트림 상태 ─────────────────────────────────
-  const [prompt,    setPrompt   ] = useState('');
+  const [prompt,    setPrompt   ] = useState('아주 간단한 일본 소개 웹사이트 만들어주세요');
+  const [model,     setModel    ] = useState('gpt');  // 선택된 모델
   const [htmlCode,  setHtmlCode ] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [charCount, setCharCount] = useState(0);
@@ -13,8 +14,8 @@ export default function App() {
   // ─── 저장된 페이지 ID (미리보기 링크) ───────────────────
   const [previewId, setPreviewId] = useState('');
 
-  // ─── 레이아웃 리사이즈 상태 ────────────────────────────
-  const [leftWidth, setLeftWidth] = useState(35);
+  // ─── 레이아웃 리사이저 상태 ────────────────────────────
+  const [leftWidth, setLeftWidth] = useState(35); // %
   const containerRef = useRef(null);
   const isResizing    = useRef(false);
 
@@ -24,7 +25,7 @@ export default function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
 
   // ─── API_BASE (로컬 / 배포 분기) ───────────────────────
-  const API_BASE = import.meta.env.VITE_API_URL || '';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
   // ─── AI 페이지 생성 핸들러 ─────────────────────────────
   const generatePage = () => {
@@ -32,14 +33,16 @@ export default function App() {
     evtRef.current?.close();
     setHtmlCode('');
     setCharCount(0);
-    setPreviewId('');      // 이전 링크 초기화
+    setPreviewId('');
     setIsLoading(true);
 
-    const url = `${API_BASE}/api/stream?message=${encodeURIComponent(prompt)}`;
+    // 선택된 모델을 쿼리 파라미터에 포함
+    const url = `${API_BASE}/api/stream?message=${encodeURIComponent(prompt)}&model=${model}`;
     evtRef.current = new EventSourcePolyfill(url);
 
     let fullHtml = '';
     evtRef.current.onmessage = e => {
+      // 스트림 끝
       if (e.data === '[DONE]') {
         evtRef.current.close();
         setIsLoading(false);
@@ -52,10 +55,32 @@ export default function App() {
         .then(res => res.json())
         .then(data => setPreviewId(data.id))
         .catch(console.error);
+        return;
+      }
+
+      // 실제 메시지 조각 처리
+      let chunk = e.data;
+      let textPiece = '';
+
+      if (model === 'gpt') {
+        // OpenAI: e.data 자체가 HTML 조각
+        textPiece = chunk;
       } else {
-        fullHtml += e.data;
+        // Anthropic: e.data 가 JSON 문자열이므로 파싱
+        try {
+          const parsed = JSON.parse(chunk);
+          // chat.completion.chunk 형태: delta.content 안에 텍스트
+          textPiece = parsed.choices?.[0]?.delta?.content || '';
+        } catch (err) {
+          // 파싱 실패 시 무시
+          textPiece = '';
+        }
+      }
+
+      if (textPiece) {
+        fullHtml += textPiece;
         setHtmlCode(fullHtml);
-        setCharCount(prev => prev + e.data.length);
+        setCharCount(prev => prev + textPiece.length);
       }
     };
 
@@ -111,6 +136,18 @@ export default function App() {
       {/* 왼쪽 입력 패널 */}
       <div className="panel input-panel" style={{ width: `${leftWidth}%` }}>
         <h1 className="title">AI Web Builder</h1>
+
+        {/* 모델 선택 드롭다운 */}
+        <select
+          className="model-selector"
+          value={model}
+          onChange={e => setModel(e.target.value)}
+          disabled={isLoading}
+        >
+          <option value="gpt">ChatGPT (OpenAI)</option>
+          <option value="claude">Claude (Anthropic)</option>
+        </select>
+
         <textarea
           className="prompt-input"
           placeholder="예: HTML/CSS로 반응형 프로필 카드 만들어 줘"
