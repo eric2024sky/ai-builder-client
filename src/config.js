@@ -32,3 +32,10 @@ export const getEventSourceUrl = (endpoint) => {
   const baseUrl = API_BASE_URL || window.location.origin;
   return `${baseUrl}${endpoint}`;
 };
+
+// Preview URL 생성 헬퍼
+export const getPreviewUrl = (path) => {
+  // preview는 항상 서버에서 처리되어야 함
+  const serverUrl = API_BASE_URL || '';
+  return `${serverUrl}${path}`;
+};

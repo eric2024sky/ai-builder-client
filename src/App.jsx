@@ -2,7 +2,7 @@
 // 수정하기 하얀 화면 문제 해결 버전
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getApiEndpoint, getEventSourceUrl } from './config';
+import { getApiEndpoint, getEventSourceUrl, getPreviewUrl } from './config';
 import './App.css';
 
 function App() {
@@ -745,15 +745,15 @@ function App() {
         type: 'assistant',
         content: `✅ 모든 페이지가 성공적으로 수정되었습니다!\n\n🎨 수정 타입: ${modTypeKorean}\n📄 수정된 페이지: ${projectInfo.pages.length}개\n⏱️ 완료 시간: ${new Date().toLocaleTimeString()}`,
         timestamp: new Date().toLocaleTimeString(),
-        previewUrl: `/preview/${projectInfo.id}`,
+        previewUrl: getPreviewUrl(`/preview/${projectInfo.id}`),
         projectId: projectInfo.id,
         generationType: 'multi',
         modificationType,
         htmlContent: indexHtml // index HTML을 저장하여 다음 수정에 사용
       }]);
       
-      setPreviewUrl(`/preview/${projectInfo.id}`);
-      updateIframePreview(`/preview/${projectInfo.id}`);
+      setPreviewUrl(getPreviewUrl(`/preview/${projectInfo.id}`));
+      updateIframePreview(getPreviewUrl(`/preview/${projectInfo.id}`));
       
       // 멀티페이지 수정 완료 후 ref 관리
       // currentProjectIdRef.current는 유지 (다음 수정을 위해)
@@ -934,15 +934,15 @@ function App() {
             generationType: config.planType || 'single',
             projectId: finalProjectId,
             pageId: finalPageId,
-            previewUrl: currentPageIdRef.current ? `/preview/${currentPageIdRef.current}` : `/preview/${finalPageId}`,
+            previewUrl: currentPageIdRef.current ? getPreviewUrl(`/preview/${currentPageIdRef.current}`) : getPreviewUrl(`/preview/${finalPageId}`),
             htmlContent: html,
             modificationType: modPlan?.modificationType
           }]);
           
           // 미리보기 URL 업데이트
           const modifiedPreviewUrl = currentPageIdRef.current 
-            ? `/preview/${currentPageIdRef.current}` 
-            : `/preview/${finalPageId}`;
+            ? getPreviewUrl(`/preview/${currentPageIdRef.current}`) 
+            : getPreviewUrl(`/preview/${finalPageId}`);
           
           log.info('수정 완료 후 미리보기 URL 설정', { 
             modifiedPreviewUrl,
@@ -1112,7 +1112,7 @@ function App() {
     
     switch (generationType) {
       case 'multi':
-        previewLink = `/preview/${finalId}`;
+        previewLink = getPreviewUrl(`/preview/${finalId}`);
         statusMessage = `멀티 페이지 웹사이트가 생성되었습니다! 총 ${finalProgress.total}개 페이지가 생성되었습니다.`;
         
         // 멀티페이지 생성 완료 시 index HTML 가져오기
@@ -1133,15 +1133,15 @@ function App() {
         }
         break;
       case 'long':
-        previewLink = `/preview/${finalId}`;
+        previewLink = getPreviewUrl(`/preview/${finalId}`);
         statusMessage = `긴 페이지가 생성되었습니다! 총 ${finalProgress.total}개 섹션으로 구성되었습니다.`;
         break;
       case 'hierarchical':
-        previewLink = `/preview/${finalId}`;
+        previewLink = getPreviewUrl(`/preview/${finalId}`);
         statusMessage = `계층적 생성이 완료되었습니다! 총 ${finalProgress.total}개 레이어로 생성되었습니다.`;
         break;
       default:
-        previewLink = `/preview/${finalId}`;
+        previewLink = getPreviewUrl(`/preview/${finalId}`);
         statusMessage = 'HTML 페이지가 생성되었습니다!';
         if (html) {
           setHtmlContent(html);
