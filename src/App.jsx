@@ -146,23 +146,11 @@ function App() {
         const iframe = e.target;
         log.info('iframe 로드 완료', { 
           src: iframe.src,
-          contentWindow: !!iframe.contentWindow,
-          readyState: iframe.contentDocument?.readyState,
-          location: iframe.contentWindow?.location?.href
+          contentWindow: !!iframe.contentWindow
         });
         
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (iframeDoc) {
-            log.info('iframe 문서 정보', {
-              title: iframeDoc.title,
-              bodyLength: iframeDoc.body?.innerHTML?.length,
-              hasContent: !!iframeDoc.body?.innerHTML
-            });
-          }
-        } catch (error) {
-          log.warn('iframe 내용 접근 불가 (CORS)', { error: error.message });
-        }
+        // Cross-origin iframe의 경우 내부 컨텐츠에 접근할 수 없음
+        log.debug('iframe 로드 완료 - cross-origin 접근 불가');
         
         setIframeError(false);
       };
@@ -1236,15 +1224,7 @@ function App() {
         iframeRef.current.src = fullUrl;
         log.info('iframe src 설정 완료', { fullUrl });
         
-        setTimeout(() => {
-          if (iframeRef.current && iframeRef.current.src === fullUrl) {
-            const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-            if (iframeDoc && iframeDoc.title === 'Only Idea') {
-              log.warn('React 앱이 로드됨 - 프록시 설정 확인 필요');
-              setIframeError(true);
-            }
-          }
-        }, 2000);
+        // iframe 로드 상태는 load/error 이벤트로 확인
       }
     }, 100);
     
@@ -1907,49 +1887,11 @@ function App() {
               onLoad={(e) => {
                 const iframe = e.target;
                 log.debug('iframe onLoad 이벤트', {
-                  src: iframe.src,
-                  readyState: iframe.contentDocument?.readyState
+                  src: iframe.src
                 });
                 
-                // iframe 내부 디버깅 설정
-                try {
-                  const iframeWindow = iframe.contentWindow;
-                  if (iframeWindow) {
-                    // 에러 이벤트 캡처
-                    iframeWindow.addEventListener('error', (error) => {
-                      log.error('iframe 내부 JavaScript 에러:', {
-                        message: error.message,
-                        filename: error.filename,
-                        lineno: error.lineno,
-                        colno: error.colno
-                      });
-                    });
-                    
-                    // 콘솔 로그 캡처
-                    const originalConsole = iframeWindow.console;
-                    ['log', 'warn', 'error'].forEach(method => {
-                      iframeWindow.console[method] = function(...args) {
-                        log.debug(`iframe console.${method}:`, args);
-                        originalConsole[method].apply(originalConsole, args);
-                      };
-                    });
-                    
-                    // 클릭 이벤트 모니터링
-                    iframeWindow.document.addEventListener('click', (e) => {
-                      const target = e.target;
-                      if (target.tagName === 'A' || target.tagName === 'BUTTON') {
-                        log.debug('iframe 내부 클릭 이벤트:', {
-                          tagName: target.tagName,
-                          href: target.href,
-                          onclick: target.onclick ? 'defined' : 'undefined',
-                          innerText: target.innerText
-                        });
-                      }
-                    });
-                  }
-                } catch (error) {
-                  log.warn('iframe 디버깅 설정 실패:', error);
-                }
+                // Cross-origin iframe의 경우 내부 접근 불가
+                log.debug('iframe 로드 완료');
               }}
               onError={(e) => {
                 log.error('iframe onError 이벤트', e);
@@ -1962,10 +1904,8 @@ function App() {
                 <button 
                   className="btn-open-preview"
                   onClick={() => {
-                    // 개발 환경에서는 Express 서버(4000번 포트)로 직접 열기
-                    const isDev = window.location.hostname === 'localhost' && window.location.port === '5173';
-                    const url = isDev ? `http://localhost:4000${previewUrl}` : previewUrl;
-                    window.open(url, '_blank');
+                    // previewUrl이 이미 완전한 URL이므로 그대로 사용
+                    window.open(previewUrl, '_blank');
                   }}
                 >
                   새 창에서 열기
