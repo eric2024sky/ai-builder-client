@@ -900,6 +900,10 @@ function App() {
         
         // 수정 작업인 경우
         if (config.isModification) {
+          log.info('HTML 콘텐츠 설정 (수정 완료)', {
+            htmlLength: html?.length,
+            isModification: true
+          });
           setHtmlContent(html);
           setIsGenerating(false);
           setWorkStatus(prev => ({ 
@@ -1961,6 +1965,19 @@ function App() {
                 >
                   새 창에서 열기
                 </button>
+              </div>
+            )}
+            
+            {/* HTML 직접 표시 (iframe 로드 실패 시 또는 previewUrl 없을 때) */}
+            {htmlContent && (!previewUrl || iframeError) && (
+              <div className="html-preview-container" style={{
+                width: '100%',
+                height: '100%',
+                overflow: 'auto',
+                background: 'white',
+                display: (!previewUrl || iframeError) ? 'block' : 'none'
+              }}>
+                <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
               </div>
             )}
           </>
