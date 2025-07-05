@@ -564,7 +564,7 @@ function App() {
     let projectInfo = null;
     if (projectId || currentProjectIdRef.current) {
       try {
-        const response = await fetch(getApiEndpoint(`/api/project/${projectId || currentProjectIdRef.current}`);
+        const response = await fetch(getApiEndpoint(`/api/project/${projectId || currentProjectIdRef.current}`));
         if (response.ok) {
           const data = await response.json();
           projectInfo = data.project;
@@ -647,7 +647,7 @@ function App() {
         });
         
         try {
-          const pageResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/${pageInfo.pageName}`);
+          const pageResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/${pageInfo.pageName}`));
           if (!pageResponse.ok) {
             throw new Error(`페이지 로드 실패: ${pageInfo.pageName}`);
           }
@@ -726,7 +726,7 @@ function App() {
       // index 페이지의 HTML을 가져와서 htmlContent 업데이트
       let indexHtml = '';
       try {
-        const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/index`);
+        const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/index`));
         if (indexResponse.ok) {
           const indexData = await indexResponse.json();
           indexHtml = indexData.html;
@@ -980,7 +980,7 @@ function App() {
           const isLastPage = config.pageIndex === plan.plan.pages.length - 1;
           if (isLastPage) {
             try {
-              const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalProjectId}/index`);
+              const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalProjectId}/index`));
               if (indexResponse.ok) {
                 const indexData = await indexResponse.json();
                 setHtmlContent(indexData.html);
@@ -1113,7 +1113,7 @@ function App() {
         
         // 멀티페이지 생성 완료 시 index HTML 가져오기
         try {
-          const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalId}/index`);
+          const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalId}/index`));
           if (indexResponse.ok) {
             const indexData = await indexResponse.json();
             multiPageIndexHtml = indexData.html;
@@ -1367,7 +1367,7 @@ function App() {
       if (item.generationType === 'multi' && item.projectId) {
         // 멀티페이지는 htmlContent가 있어도 항상 최신 index HTML을 가져옴
         try {
-          const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${item.projectId}/index`);
+          const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${item.projectId}/index`));
           if (indexResponse.ok) {
             const indexData = await indexResponse.json();
             setHtmlContent(indexData.html);
