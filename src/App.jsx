@@ -1,1349 +1,1966 @@
 // ai-builder-client/App.jsx
+// 수정하기 하얀 화면 문제 해결 버전
 
-import { useState, useRef, useEffect } from 'react';
-import { EventSourcePolyfill } from 'event-source-polyfill';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-export default function App() {
-  // ─── AI & 스트림 상태 ─────────────────────────────────
-  const [prompt, setPrompt] = useState('아주 간단한 일본 소개 웹사이트 만들어주세요');
-  const [htmlCode, setHtmlCode] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [charCount, setCharCount] = useState(0);
-  const evtRef = useRef(null);
-
-  // ─── 작업 상태 및 디버깅 ──────────────────────────────
-  const [workStatus, setWorkStatus] = useState('대기 중');
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [lastActivity, setLastActivity] = useState(null);
-  const [errorDetails, setErrorDetails] = useState(null);
-  const [debugLogs, setDebugLogs] = useState([]);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-
-  // ─── 계층적 생성 상태 ────────────────────────────────
-  const [isHierarchicalGeneration, setIsHierarchicalGeneration] = useState(false);
-  const [currentLayer, setCurrentLayer] = useState(0);
-  const [totalLayers, setTotalLayers] = useState(0);
-  const [layerProgress, setLayerProgress] = useState([]);
-  const [hierarchicalPlan, setHierarchicalPlan] = useState(null);
-
-  // ─── 채팅 기록 상태 ────────────────────────────────────
+function App() {
+  const [chatInput, setChatInput] = useState('');
+  const [htmlContent, setHtmlContent] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [status, setStatus] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
-  const [currentRequest, setCurrentRequest] = useState('');
-  const [isModifying, setIsModifying] = useState(false);
-  const chatEndRef = useRef(null);
-
-  // ─── 히스토리 관리 상태 ────────────────────────────────
-  const [htmlHistory, setHtmlHistory] = useState([]); // 모든 HTML 버전 저장
-  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1); // 현재 보고 있는 버전
-  const [previewIds, setPreviewIds] = useState([]); // 각 버전별 미리보기 ID
-
-  // ─── 저장된 페이지 ID (미리보기 링크) ───────────────────
-  const [previewId, setPreviewId] = useState('');
-
-  // ─── 레이아웃 리사이저 상태 ────────────────────────────
-  const [leftWidth, setLeftWidth] = useState(35); // %
-  const containerRef = useRef(null);
-  const isResizing = useRef(false);
-
-  // ─── 테마 토글 상태 ─────────────────────────────────────
-  const [theme, setTheme] = useState('dark');
-  const toggleTheme = () =>
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
-
-  // ─── HTML 코드를 blob URL로 변환하는 함수 ──────────────
-  const createBlobUrl = (htmlContent) => {
-    try {
-      const blob = new Blob([htmlContent], { type: 'text/html' });
-      return URL.createObjectURL(blob);
-    } catch (error) {
-      console.error('Blob URL 생성 실패:', error);
-      addDebugLog('error', 'Blob URL 생성 실패', error);
-      return null;
-    }
-  };
-
-  // ─── Blob URL 정리 함수 ─────────────────────────────────
-  const [currentBlobUrl, setCurrentBlobUrl] = useState(null);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(35);
+  const [isResizing, setIsResizing] = useState(false);
+  const [generatedChars, setGeneratedChars] = useState(0);
+  const [currentViewIndex, setCurrentViewIndex] = useState(-1);
+  const [iframeError, setIframeError] = useState(false);
   
-  const updateHtmlWithBlob = (htmlContent) => {
-    // 이전 blob URL 정리
-    if (currentBlobUrl) {
-      URL.revokeObjectURL(currentBlobUrl);
-    }
-    
-    // 새 blob URL 생성
-    const newBlobUrl = createBlobUrl(htmlContent);
-    if (newBlobUrl) {
-      setCurrentBlobUrl(newBlobUrl);
-      setHtmlCode(htmlContent);
-      addDebugLog('success', 'Blob URL 업데이트', { 
-        url: newBlobUrl.substring(0, 50) + '...', 
-        length: htmlContent.length 
-      });
+  const [generationPlan, setGenerationPlan] = useState(null);
+  const [currentProgress, setCurrentProgress] = useState({
+    type: null,
+    current: 0,
+    total: 0,
+    results: []
+  });
+  
+  const [projectId, setProjectId] = useState(null);
+  
+  const [workStatus, setWorkStatus] = useState({
+    isConnected: false,
+    currentWork: '',
+    lastActivity: null,
+    error: null
+  });
+  
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugLogs, setDebugLogs] = useState([]);
+  
+  const resizeRef = useRef(null);
+  const eventSourceRef = useRef(null);
+  const iframeRef = useRef(null);
+  const lastPromptRef = useRef('');
+  const currentPlanRef = useRef(null);
+  const currentProjectIdRef = useRef(null);
+  const currentPageIdRef = useRef(null);
+  const isModificationRef = useRef(false);
+  const isExecutingPlanRef = useRef(false);
+
+  const log = {
+    info: (message, data = null) => {
+      console.log(`[INFO] ${message}`, data || '');
+      addDebugLog('info', message, data);
+    },
+    error: (message, data = null) => {
+      console.error(`[ERROR] ${message}`, data || '');
+      addDebugLog('error', message, data);
+    },
+    warn: (message, data = null) => {
+      console.warn(`[WARN] ${message}`, data || '');
+      addDebugLog('warning', message, data);
+    },
+    debug: (message, data = null) => {
+      if (showDebug) {
+        console.log(`[DEBUG] ${message}`, data || '');
+        addDebugLog('debug', message, data);
+      }
     }
   };
+
   const addDebugLog = (type, message, data = null) => {
     const logEntry = {
-      timestamp: new Date().toLocaleTimeString(),
-      type, // 'info', 'success', 'warning', 'error'
+      id: Date.now() + Math.random(),
+      time: new Date().toLocaleTimeString(),
+      type,
       message,
       data
     };
-    
-    setDebugLogs(prev => {
-      const newLogs = [...prev, logEntry];
-      // 최대 50개 로그만 유지
-      return newLogs.slice(-50);
+    setDebugLogs(prev => [...prev.slice(-50), logEntry]);
+  };
+
+  const downloadLogs = async () => {
+    try {
+      const response = await fetch('/api/logs/download');
+      if (!response.ok) {
+        throw new Error('로그 다운로드 실패');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai-builder-logs-${new Date().toISOString().split('T')[0]}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      log.info('로그 다운로드 완료');
+    } catch (error) {
+      log.error('로그 다운로드 오류', error);
+      alert('로그 다운로드 중 오류가 발생했습니다.');
+    }
+  };
+
+  useEffect(() => {
+    testConnection();
+  }, []);
+
+  useEffect(() => {
+    log.info('previewUrl 변경됨', {
+      newUrl: previewUrl,
+      hasIframe: !!iframeRef.current,
+      currentIframeSrc: iframeRef.current?.src
     });
     
-    console.log(`[${type.toUpperCase()}] ${message}`, data || '');
-  };
-
-  // ─── 작업 상태 업데이트 함수 ────────────────────────────
-  const updateWorkStatus = (status, details = null) => {
-    setWorkStatus(status);
-    setLastActivity(new Date());
-    addDebugLog('info', `작업 상태 변경: ${status}`, details);
-  };
-
-  // ─── 연결 상태 업데이트 함수 ────────────────────────────
-  const updateConnectionStatus = (status) => {
-    setConnectionStatus(status);
-    addDebugLog('info', `연결 상태: ${status}`);
-  };
-  // ─── 깨진/무관한 이미지 자동 수정 함수 ─────────────────────────
-  const fixBrokenImages = (html) => {
-    // 모든 깨진 이미지 URL을 제거하거나 안정적인 대안으로 교체
-    return html
-      .replace(/https?:\/\/source\.unsplash\.com\/random\/(\d+)x(\d+)\/\?([^"'\s>]*)/g, 
-        (match, width, height, query) => {
-          // 관련 없는 랜덤 이미지는 제거
-          return '';
-        })
-      .replace(/https?:\/\/source\.unsplash\.com\/(\d+)x(\d+)\/\?([^"'\s>]*)/g, 
-        (match, width, height, query) => {
-          return '';
-        })
-      .replace(/https?:\/\/source\.unsplash\.com\/random\/(\d+)x(\d+)/g, 
-        (match, width, height) => {
-          return '';
-        })
-      .replace(/https?:\/\/via\.placeholder\.com\/([^"'\s>]*)/g, 
-        (match, params) => {
-          // placeholder 이미지도 제거
-          return '';
-        })
-      // 빈 img 태그들도 정리
-      .replace(/<img[^>]*src=["'][\s]*["'][^>]*>/g, '')
-      .replace(/<img[^>]*>/g, (match) => {
-        // src가 비어있거나 무효한 img 태그 제거
-        if (!match.includes('src=') || match.includes('src=""') || match.includes("src=''")) {
-          return '';
-        }
-        return match;
-      });
-  };
-
-  // ─── 특정 메시지의 요청 컨텍스트 찾기 ─────────────────────────
-  const findRequestContext = (messageIndex) => {
-    console.log('Finding request context for message index:', messageIndex);
-    
-    // 해당 메시지가 HTML을 포함하는지 확인
-    const targetMessage = chatHistory[messageIndex];
-    if (!targetMessage || !targetMessage.htmlContent) {
-      console.warn('Target message does not contain HTML content');
-      return null;
+    if (previewUrl && iframeRef.current) {
+      const currentSrc = iframeRef.current.src;
+      const newFullUrl = previewUrl.startsWith('http') 
+        ? previewUrl 
+        : `${window.location.origin}${previewUrl}`;
+      
+      if (currentSrc !== newFullUrl) {
+        log.info('iframe src 업데이트 필요', {
+          currentSrc,
+          newFullUrl
+        });
+        updateIframePreview(previewUrl);
+      }
     }
+  }, [previewUrl]);
 
-    // 해당 HTML을 생성한 직전 사용자 메시지 찾기
-    let userPrompt = '';
-    let previousHtml = '';
-    let isModification = false;
-
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      if (chatHistory[i].type === 'user') {
-        userPrompt = chatHistory[i].content;
+  useEffect(() => {
+    if (iframeRef.current) {
+      const handleLoad = (e) => {
+        const iframe = e.target;
+        log.info('iframe 로드 완료', { 
+          src: iframe.src,
+          contentWindow: !!iframe.contentWindow,
+          readyState: iframe.contentDocument?.readyState,
+          location: iframe.contentWindow?.location?.href
+        });
         
-        // 수정 요청인지 확인 (🔄로 시작하지 않는 경우만)
-        if (!userPrompt.startsWith('🔄')) {
-          // 이 사용자 요청 이전에 HTML이 있었는지 확인
-          for (let j = i - 1; j >= 0; j--) {
-            if (chatHistory[j].type === 'assistant' && chatHistory[j].htmlContent) {
-              previousHtml = chatHistory[j].htmlContent;
-              isModification = true;
-              break;
-            }
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (iframeDoc) {
+            log.info('iframe 문서 정보', {
+              title: iframeDoc.title,
+              bodyLength: iframeDoc.body?.innerHTML?.length,
+              hasContent: !!iframeDoc.body?.innerHTML
+            });
           }
+        } catch (error) {
+          log.warn('iframe 내용 접근 불가 (CORS)', { error: error.message });
         }
-        break;
-      }
-    }
+        
+        setIframeError(false);
+      };
 
-    console.log('Found context:', { userPrompt, isModification, hasPreviousHtml: !!previousHtml });
-    
-    return userPrompt ? {
-      prompt: userPrompt,
-      isModification,
-      previousHtml
-    } : null;
-  };
+      const handleError = (e) => {
+        log.error('iframe 로드 실패', { 
+          src: iframeRef.current.src,
+          error: e
+        });
+        setIframeError(true);
+      };
 
-  // ─── 특정 메시지 다시 생성 핸들러 ─────────────────────────
-  const regenerateSpecificMessage = (messageIndex) => {
-    console.log('Regenerate specific message called, message index:', messageIndex);
-    
-    const context = findRequestContext(messageIndex);
-    
-    if (context) {
-      const { prompt: originalPrompt, isModification, previousHtml } = context;
-      
-      // 채팅 기록에 다시 생성 알림 추가
-      addToChatHistory('user', `🔄 "${originalPrompt}" 다시 생성`);
-      
-      // 기존 HTML 초기화하고 새로 생성
-      setHtmlCode('');
-      
-      setTimeout(() => {
-        // 컨텍스트에 맞는 생성 실행
-        generatePageWithContext(originalPrompt, isModification, previousHtml);
-      }, 100);
-    } else {
-      console.warn('Could not find request context');
-      alert('요청 컨텍스트를 찾을 수 없습니다.');
-    }
-  };
+      iframeRef.current.addEventListener('load', handleLoad);
+      iframeRef.current.addEventListener('error', handleError);
 
-  // ─── 서버 상태 확인 함수 ────────────────────────────
-  const checkServerHealth = async () => {
-    try {
-      updateWorkStatus('서버 상태 확인 중...');
-      const response = await fetch(`${API_BASE}/api/health`);
-      const health = await response.json();
-      
-      addDebugLog('success', '서버 상태 확인 완료', health);
-      
-      if (health.mongodb !== 'connected') {
-        addDebugLog('warning', 'MongoDB 연결 상태 이상', { status: health.mongodb });
-      }
-      
-      if (health.anthropic !== 'configured') {
-        addDebugLog('error', 'Anthropic API 키 설정 누락');
-      }
-      
-      updateWorkStatus('서버 정상');
-      return health;
-    } catch (error) {
-      addDebugLog('error', '서버 상태 확인 실패', error);
-      updateWorkStatus('서버 연결 실패');
-      setErrorDetails({
-        type: 'server_unreachable',
-        message: '서버에 접근할 수 없습니다.',
-        suggestion: '서버가 실행 중인지 확인하고 포트 4000이 열려있는지 확인하세요.'
+      log.debug('iframe 마운트', {
+        src: iframeRef.current.src,
+        sandbox: iframeRef.current.sandbox.toString()
       });
-      throw error;
-    }
-  };
 
-  // ─── 연결 테스트 함수 ───────────────────────────────
+      return () => {
+        if (iframeRef.current) {
+          iframeRef.current.removeEventListener('load', handleLoad);
+          iframeRef.current.removeEventListener('error', handleError);
+        }
+      };
+    }
+  }, [previewUrl]);
+
   const testConnection = async () => {
     try {
-      updateWorkStatus('API 연결 테스트 중...');
-      const response = await fetch(`${API_BASE}/api/test-connection`);
-      const result = await response.json();
+      const response = await fetch('/api/test-connection');
+      const data = await response.json();
       
-      if (result.success) {
-        addDebugLog('success', 'API 연결 테스트 성공', result);
-        updateWorkStatus('API 연결 정상');
+      if (data.success) {
+        setWorkStatus(prev => ({ ...prev, isConnected: true }));
+        log.info('API 연결 성공', data);
       } else {
-        addDebugLog('error', 'API 연결 테스트 실패', result);
-        updateWorkStatus('API 연결 실패');
-        setErrorDetails({
-          type: 'api_test_failed',
-          message: result.error || 'API 테스트에 실패했습니다.',
-          suggestion: 'Anthropic API 키가 올바른지 확인하세요.'
-        });
+        setWorkStatus(prev => ({ 
+          ...prev, 
+          isConnected: false, 
+          error: data.error 
+        }));
+        log.error('API 연결 실패', data);
       }
-      
-      return result;
     } catch (error) {
-      addDebugLog('error', 'API 연결 테스트 오류', error);
-      updateWorkStatus('API 테스트 실패');
-      throw error;
+      setWorkStatus(prev => ({ 
+        ...prev, 
+        isConnected: false, 
+        error: error.message 
+      }));
+      log.error('연결 테스트 실패', { error: error.message });
     }
   };
 
-  // ─── 컴포넌트 마운트 시 서버 상태 확인 ─────────────────
-  useEffect(() => {
-    const initializeApp = async () => {
-      addDebugLog('info', '앱 초기화 시작');
-      
-      try {
-        await checkServerHealth();
-        addDebugLog('info', '앱 초기화 완료');
-        updateWorkStatus('준비 완료');
-      } catch (error) {
-        addDebugLog('error', '앱 초기화 실패', error);
-      }
-    };
+  const startStreaming = async (message, config = {}) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    setIsGenerating(true);
+    setGeneratedChars(0);
+    setIframeError(false);
+    isModificationRef.current = config.isModification || false;
     
-    initializeApp();
-  }, []);
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-
-  // ─── 채팅 스크롤 자동 이동 ─────────────────────────────
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [chatHistory]);
-
-  // ─── 채팅 기록에 메시지 추가 ──────────────────────────
-  const addToChatHistory = (type, content, timestamp = new Date(), htmlContent = null) => {
-    const newMessage = { type, content, timestamp, htmlContent };
-    console.log('Adding message to chat history:', newMessage);
-    
-    setChatHistory(prev => {
-      const newHistory = [...prev, newMessage];
-      console.log('New chat history length:', newHistory.length);
-      console.log('Last message:', newHistory[newHistory.length - 1]);
-      return newHistory;
+    log.info('startStreaming 시작', {
+      isModification: config.isModification,
+      currentProjectId: currentProjectIdRef.current,
+      currentPageId: currentPageIdRef.current,
+      modificationScope: config.modificationScope,
+      hasCurrentHtml: !!config.currentHtml,
+      currentHtmlLength: config.currentHtml?.length || 0
     });
     
-    // HTML이 포함된 메시지인 경우 히스토리에 추가
-    if (htmlContent) {
-      setHtmlHistory(prev => {
-        const newHistory = [...prev, htmlContent];
-        const newIndex = newHistory.length - 1;
-        setCurrentHistoryIndex(newIndex);
-        console.log('HTML history updated, new index:', newIndex);
-        return newHistory;
-      });
-    }
-  };
-
-  // ─── 히스토리 아이템 클릭 핸들러 ──────────────────────
-  const handleHistoryClick = (messageIndex, htmlContent) => {
-    if (htmlContent) {
-      setHtmlCode(htmlContent);
+    let workMessage = '생성 중...';
+    if (config.isModification) {
+      workMessage = '수정 중...';
+    } else if (config.planType === 'multi') {
+      workMessage = `페이지 ${config.pageIndex + 1}/${config.totalPages} 생성 중... (${config.pageName})`;
       
-      // 메시지 인덱스에서 HTML 히스토리 인덱스 찾기
-      let htmlIndex = 0;
-      for (let i = 0; i <= messageIndex; i++) {
-        if (chatHistory[i] && chatHistory[i].htmlContent) {
-          if (i === messageIndex) break;
-          htmlIndex++;
+      // 멀티 페이지 생성 진행 상황 업데이트
+      if (config.pageIndex > 0) {
+        setChatHistory(prev => {
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage && lastMessage.isProgressUpdate && !lastMessage.isModificationPlan) {
+            return [...prev.slice(0, -1), {
+              ...lastMessage,
+              content: `📄 멀티 페이지 생성 진행 중...\n\n🔄 현재 작업: ${config.pageName} 페이지\n📋 진행률: ${config.pageIndex + 1}/${config.totalPages} (${Math.round(((config.pageIndex + 1) / config.totalPages) * 100)}%)`,
+              timestamp: new Date().toLocaleTimeString()
+            }];
+          }
+          return prev;
+        });
+      }
+    } else if (config.planType === 'long') {
+      workMessage = `섹션 ${config.sectionIndex + 1}/${config.totalSections} 생성 중...`;
+    } else if (config.planType === 'hierarchical') {
+      workMessage = `레이어 ${config.layerIndex + 1}/${config.totalLayers} 생성 중...`;
+    }
+    
+    setWorkStatus(prev => ({ 
+      ...prev, 
+      currentWork: workMessage,
+      lastActivity: new Date()
+    }));
+
+    log.info('스트리밍 시작', { 
+      message: message ? message.substring(0, 50) : 'No message',
+      config,
+      currentProjectId: currentProjectIdRef.current,
+      currentPageId: currentPageIdRef.current
+    });
+
+    const params = new URLSearchParams({
+      message: message || '',
+      isModification: config.isModification?.toString() || 'false',
+      currentHtml: config.currentHtml || '',
+      planType: config.planType || '',
+      projectId: currentProjectIdRef.current || projectId || '',
+      pageId: currentPageIdRef.current || '',  // pageId 추가
+      pageName: config.pageName || 'index',
+      pageIndex: config.pageIndex || 0,
+      totalPages: config.totalPages || 1,
+      sectionIndex: config.sectionIndex || 0,
+      totalSections: config.totalSections || 1,
+      layerIndex: config.layerIndex || 0,
+      totalLayers: config.totalLayers || 1,
+      modificationScope: config.modificationScope || '',
+      targetPageName: config.targetPageName || ''
+    });
+    
+    // Base44 모드에서는 modificationPlan 사용하지 않음
+
+    try {
+      const eventSource = new EventSource(`/api/stream?${params}`);
+      eventSourceRef.current = eventSource;
+
+      let accumulatedHtml = '';
+      let streamTimeout = null;
+
+      const resetTimeout = () => {
+        if (streamTimeout) clearTimeout(streamTimeout);
+        streamTimeout = setTimeout(() => {
+          setWorkStatus(prev => ({ 
+            ...prev, 
+            currentWork: '응답 대기 중... (시간 초과)',
+            error: 'Stream timeout - 10분 이상 응답 없음'
+          }));
+          log.warn('스트림 타임아웃');
+          
+          if (confirm('응답 시간이 초과되었습니다. 다시 시도하시겠습니까?')) {
+            eventSource.close();
+            startStreaming(message, config);
+          } else {
+            eventSource.close();
+            setIsGenerating(false);
+          }
+        }, 600000);
+      };
+
+      resetTimeout();
+
+      eventSource.onopen = () => {
+        setWorkStatus(prev => ({ ...prev, isConnected: true, error: null }));
+        log.debug('스트리밍 연결 열림');
+      };
+
+      eventSource.onmessage = (event) => {
+        resetTimeout();
+        setWorkStatus(prev => ({ ...prev, lastActivity: new Date() }));
+
+        if (event.data === '[DONE]') {
+          eventSource.close();
+          if (streamTimeout) clearTimeout(streamTimeout);
+          
+          // 생성 완료 처리
+          handleGenerationComplete(accumulatedHtml, message, config);
+          return;
         }
-      }
-      
-      setCurrentHistoryIndex(htmlIndex);
-      console.log('Selected history index:', htmlIndex, 'Total history:', htmlHistory.length);
+
+        // 2단계 plan 진행 상황 처리
+        if (event.data.startsWith('[PLAN_PROGRESS]')) {
+          const progressData = JSON.parse(event.data.substring(15));
+          log.info('2단계 plan 진행 상황', progressData);
+          
+          if (progressData.type === 'stage') {
+            setChatHistory(prev => [...prev, {
+              type: 'assistant',
+              content: `🔄 ${progressData.data.message}`,
+              timestamp: new Date().toLocaleTimeString(),
+              isPlanProgress: true
+            }]);
+          } else if (progressData.type === 'needsAnalysis') {
+            setChatHistory(prev => [...prev, {
+              type: 'assistant',
+              content: `✅ 니즈 분석 완료\n\n📋 프로젝트: ${progressData.data.projectName}\n🎯 타입: ${progressData.data.siteType}\n🎨 주요 기능: ${progressData.data.features.join(', ')}`,
+              timestamp: new Date().toLocaleTimeString(),
+              isPlanProgress: true
+            }]);
+          } else if (progressData.type === 'architecturePhase') {
+            setChatHistory(prev => [...prev, {
+              type: 'assistant',
+              content: `📐 아키텍처 설계 - ${progressData.data.phase} (${progressData.data.current}/${progressData.data.total})`,
+              timestamp: new Date().toLocaleTimeString(),
+              isPlanProgress: true,
+              isProgressUpdate: true
+            }]);
+          } else if (progressData.type === 'architecture') {
+            setChatHistory(prev => [...prev, {
+              type: 'assistant',
+              content: `✅ 아키텍처 설계 완료\n\n🏗️ 레이아웃: ${progressData.data.layout.type}\n📄 페이지 수: ${progressData.data.pages.length}`,
+              timestamp: new Date().toLocaleTimeString(),
+              isPlanProgress: true
+            }]);
+          } else if (progressData.type === 'component') {
+            setChatHistory(prev => [...prev, {
+              type: 'assistant',
+              content: `🔧 컴포넌트 생성 중... (${progressData.data.current}/${progressData.data.total})\n📦 ${progressData.data.name}`,
+              timestamp: new Date().toLocaleTimeString(),
+              isPlanProgress: true,
+              isProgressUpdate: true
+            }]);
+          }
+          return;
+        }
+
+        if (event.data.startsWith('[GENERATION_PLAN]')) {
+          const planData = event.data.substring(17);
+          const plan = JSON.parse(planData);
+          log.info('생성 계획 수신', plan);
+          
+          currentPlanRef.current = plan;
+          setGenerationPlan(plan);
+          
+          // EventSource 닫기
+          eventSource.close();
+          if (streamTimeout) clearTimeout(streamTimeout);
+          
+          executeGenerationPlan(plan);
+          return;
+        }
+
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'progress') {
+            setGeneratedChars(data.chars || 0);
+            log.debug(`진행 중: ${data.chars}자`);
+          }
+          else if (data.choices?.[0]?.delta?.content) {
+            accumulatedHtml += data.choices[0].delta.content;
+            setGeneratedChars(accumulatedHtml.length);
+          }
+          else if (data.type === 'completion') {
+            setWorkStatus(prev => ({ 
+              ...prev, 
+              currentWork: '생성 완료!',
+              isConnected: true 
+            }));
+            log.info('생성 완료', data);
+          }
+          else if (data.error) {
+            throw new Error(data.error);
+          }
+        } catch (error) {
+          if (event.data.includes('<!DOCTYPE html>') || event.data.includes('<html')) {
+            accumulatedHtml += event.data;
+            setGeneratedChars(accumulatedHtml.length);
+          } else {
+            log.error('Stream 파싱 오류', { error: error.message, data: event.data });
+          }
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        log.error('EventSource 오류', error);
+        eventSource.close();
+        if (streamTimeout) clearTimeout(streamTimeout);
+        
+        setIsGenerating(false);
+        setWorkStatus(prev => ({ 
+          ...prev, 
+          isConnected: false,
+          currentWork: '연결 끊김',
+          error: 'Streaming connection lost'
+        }));
+        
+        setChatHistory(prev => [...prev, {
+          type: 'error',
+          content: '연결 오류가 발생했습니다. 다시 시도해주세요.',
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+      };
+    } catch (error) {
+      log.error('startStreaming 오류', error);
+      setIsGenerating(false);
     }
   };
 
-  // ─── 현재 미리보기 ID 가져오기 ────────────────────────
-  const getCurrentPreviewId = () => {
-    console.log('Getting preview ID - Current index:', currentHistoryIndex, 'Available IDs:', previewIds.length);
-    
-    // 유효한 인덱스 범위 확인
-    if (currentHistoryIndex >= 0 && currentHistoryIndex < previewIds.length) {
-      const selectedId = previewIds[currentHistoryIndex];
-      console.log('Selected preview ID:', selectedId);
-      return selectedId;
-    }
-    
-    // fallback: 가장 최근 ID 또는 기본 ID
-    const fallbackId = previewIds.length > 0 ? previewIds[previewIds.length - 1] : previewId;
-    console.log('Using fallback ID:', fallbackId);
-    return fallbackId;
-  };
+  const executeGenerationPlan = (plan) => {
+    const progress = {
+      type: plan.type,
+      current: 0,
+      total: 0,
+      results: []
+    };
 
-  // ─── 계층적 생성 초기화 ──────────────────────────────
-  const initializeHierarchicalGeneration = (plan) => {
-    setIsHierarchicalGeneration(true);
-    setHierarchicalPlan(plan);
-    setCurrentLayer(0);
-    setTotalLayers(plan.layers.length);
-    setLayerProgress(plan.layers.map(() => ({ completed: false, html: '' })));
-    
-    // 계층적 생성 시작 메시지 추가
-    addToChatHistory('assistant', `🏗️ 복잡한 웹사이트를 ${plan.layers.length}단계로 나누어 생성합니다...`);
-  };
-
-  // ─── 계층적 생성 완료 처리 ──────────────────────────────
-  const completeHierarchicalGeneration = (finalHtml) => {
-    setIsHierarchicalGeneration(false);
-    setCurrentLayer(0);
-    setTotalLayers(0);
-    setLayerProgress([]);
-    setHierarchicalPlan(null);
-    
-    // 최종 완료 메시지
-    addToChatHistory('assistant', '🎉 모든 계층의 생성이 완료되었습니다! 최종 결과를 확인해보세요.', new Date(), finalHtml);
-  };
-
-  // ─── 계층적 생성 진행 처리 ──────────────────────────────
-  const processHierarchicalLayer = async (layerIndex, layerHtml) => {
-    console.log(`Processing layer ${layerIndex + 1}/${totalLayers}`);
-    
-    // 현재 레이어 진행 상태 업데이트
-    setLayerProgress(prev => {
-      const newProgress = [...prev];
-      newProgress[layerIndex] = { completed: true, html: layerHtml };
-      return newProgress;
-    });
-    
-    // 계층 완료 메시지 추가
-    const layerName = hierarchicalPlan?.layers[layerIndex]?.name || `레이어 ${layerIndex + 1}`;
-    addToChatHistory('assistant', `✅ ${layerName} 완료`);
-    
-    // 다음 레이어가 있는 경우 계속 진행
-    if (layerIndex + 1 < totalLayers) {
-      setCurrentLayer(layerIndex + 1);
+    // Base44 범용 계획 처리
+    if (plan.plan && plan.plan.conversationSeed) {
+      // Base44 방식: 범용 계획에서 초기 대화 시드 사용
+      const userPrompt = plan.plan.conversationSeed.find(msg => msg.role === 'user')?.content || plan.description;
+      progress.total = plan.plan.layers ? plan.plan.layers.length : 1;
+      setCurrentProgress(progress);
       
-      // 다음 레이어 생성 시작
-      setTimeout(() => {
-        generateNextLayer(layerIndex + 1);
-      }, 500);
+      log.info('Base44 범용 계획 실행', {
+        complexity: plan.plan.complexity,
+        totalLayers: plan.plan.layers?.length || 1,
+        estimatedPages: plan.plan.estimatedPages
+      });
+      
+      // 생성 진행 상황 채팅 버블
+      setChatHistory(prev => [...prev, {
+        type: 'assistant',
+        content: `🚀 ${plan.plan.siteType} 생성 시작\n\n🎯 복잡도: ${plan.plan.complexity}\n📄 예상 페이지: ${plan.plan.estimatedPages}개\n🔄 계층: ${plan.plan.layers?.length || 1}개`,
+        timestamp: new Date().toLocaleTimeString(),
+        isProgressUpdate: true
+      }]);
+      
+      startStreaming(userPrompt, {
+        planType: plan.type || 'single',
+        universalPlan: plan.plan
+      });
+      
     } else {
-      // 모든 레이어 완료 - 최종 HTML 조합
-      const allLayers = layerProgress.map(p => p.html).join('\n');
-      const finalFixedHtml = fixBrokenImages(allLayers);
-      setHtmlCode(finalFixedHtml);
-      completeHierarchicalGeneration(finalFixedHtml);
+      // 기존 방식 (backward compatibility)
+      switch (plan.type) {
+        case 'single':
+          progress.total = 1;
+          setCurrentProgress(progress);
+          startStreaming(plan.plan?.prompt || plan.description || '', { planType: 'single' });
+          break;
+          
+        case 'multi':
+          progress.total = plan.plan?.pages?.length || 1;
+          setCurrentProgress(progress);
+          log.info('멀티 페이지 생성 시작', { total: progress.total });
+          
+          // 멀티 페이지 생성 진행 상황 채팅 버블
+          setChatHistory(prev => [...prev, {
+            type: 'assistant',
+            content: `📄 멀티 페이지 생성 시작\n\n📃 총 ${plan.plan?.pages?.length || 0}개 페이지 생성 예정\n🔄 현재 작업: ${plan.plan?.pages?.[0]?.pageName || 'index'} 페이지`,
+            timestamp: new Date().toLocaleTimeString(),
+            isProgressUpdate: true
+          }]);
+          
+          if (plan.plan?.pages?.[0]) {
+            startStreaming(plan.plan.pages[0].prompt || plan.description || '', {
+              planType: 'multi',
+              pageIndex: 0,
+              totalPages: plan.plan.pages.length,
+              pageName: plan.plan.pages[0].pageName
+            });
+          }
+          break;
+          
+        case 'long':
+          progress.total = plan.plan?.sections?.length || 1;
+          setCurrentProgress(progress);
+          if (plan.plan?.sections?.[0]) {
+            startStreaming(plan.plan.sections[0].prompt || plan.description || '', {
+              planType: 'long',
+              sectionIndex: 0,
+              totalSections: plan.plan.sections.length
+            });
+          }
+          break;
+          
+        case 'hierarchical':
+          progress.total = plan.plan?.layers?.length || 1;
+          setCurrentProgress(progress);
+          if (plan.plan?.layers?.[0]) {
+            startStreaming(plan.plan.layers[0].prompt || plan.description || '', {
+              planType: 'hierarchical',
+              layerIndex: 0,
+              totalLayers: plan.plan.layers.length
+            });
+          }
+          break;
+      }
     }
   };
 
-  // ─── 다음 계층 생성 ────────────────────────────────────
-  const generateNextLayer = (layerIndex) => {
-    if (!hierarchicalPlan || layerIndex >= hierarchicalPlan.layers.length) return;
+  
+  const executeModificationPlan = async (plan, modificationRequest) => {
+    log.info('수정 계획 실행 시작', plan);
     
-    const layer = hierarchicalPlan.layers[layerIndex];
-    const previousLayers = layerProgress.slice(0, layerIndex).map(p => p.html).join('\n');
+    setWorkStatus(prev => ({ 
+      ...prev, 
+      currentWork: `수정 중... (범위: ${plan.scope}, 복잡도: ${plan.estimatedComplexity})`
+    }));
     
-    // 레이어별 생성 요청
-    const layerPrompt = layer.prompt;
-    const contextHtml = previousLayers;
-    
-    console.log(`Generating layer ${layerIndex + 1}: ${layer.name}`);
-    addToChatHistory('assistant', `🔧 ${layer.name} 생성 중...`);
-    
-    // 레이어별 생성 실행
-    generateLayerWithContext(layerPrompt, true, contextHtml, layerIndex);
-  };
-
-  // ─── 레이어별 컨텍스트 생성 핸들러 ─────────────────────────
-  const generateLayerWithContext = (requestText, isModificationRequest = false, previousHtmlContext = '', layerIndex = 0) => {
-    if (!requestText.trim()) return;
-
-    evtRef.current?.close();
-    setCharCount(0);
-    setIsLoading(true);
-    setIsModifying(isModificationRequest);
-
-    console.log('Generate layer with context:', {
-      requestText,
-      isModificationRequest,
-      hasPreviousContext: !!previousHtmlContext,
-      layerIndex
-    });
-
-    // URL 파라미터로 전송 (계층적 생성 정보 포함)
-    const params = new URLSearchParams({
-      message: requestText,
-      isModification: isModificationRequest.toString(),
-      currentHtml: isModificationRequest ? previousHtmlContext : '',
-      isHierarchical: 'true',
-      layerIndex: layerIndex.toString(),
-      totalLayers: totalLayers.toString()
-    });
-
-    const url = `${API_BASE}/api/stream?${params.toString()}`;
-    console.log('Connecting to:', url);
-
-    evtRef.current = new EventSourcePolyfill(url);
-
-    let fullHtml = '';
-    let updateTimer = null;
-    let hasStartedReceiving = false;
-    let lastUpdateTime = 0;
-    
-    // 더 부드러운 업데이트를 위한 함수
-    const smoothUpdateHtml = () => {
-      const now = Date.now();
-      if (now - lastUpdateTime < 300) {
-        if (updateTimer) clearTimeout(updateTimer);
-        updateTimer = setTimeout(() => {
-          // 계층적 생성 중에는 임시 HTML을 표시
-          const tempHtml = layerProgress.slice(0, layerIndex).map(p => p.html).join('\n') + fullHtml;
-          const fixedHtml = fixBrokenImages(tempHtml);
-          setHtmlCode(fixedHtml);
-          lastUpdateTime = Date.now();
-        }, 300);
-      } else {
-        const tempHtml = layerProgress.slice(0, layerIndex).map(p => p.html).join('\n') + fullHtml;
-        const fixedHtml = fixBrokenImages(tempHtml);
-        setHtmlCode(fixedHtml);
-        lastUpdateTime = now;
-      }
-    };
-    
-    evtRef.current.onmessage = e => {
-      console.log('Received layer data:', e.data);
-      
-      // 스트림 끝
-      if (e.data === '[DONE]') {
-        evtRef.current.close();
-        
-        // 레이어 HTML 완성
-        const finalLayerHtml = fixBrokenImages(fullHtml);
-        
-        setTimeout(() => {
-          setIsLoading(false);
-          setIsModifying(false);
-          
-          // 현재 레이어 처리 완료
-          processHierarchicalLayer(layerIndex, finalLayerHtml);
-          
-        }, 200);
-        return;
-      }
-
-      // 에러 메시지 처리
+    let projectInfo = null;
+    if (projectId || currentProjectIdRef.current) {
       try {
-        const parsed = JSON.parse(e.data);
-        if (parsed.error) {
-          evtRef.current.close();
-          setIsLoading(false);
-          setIsModifying(false);
-          addToChatHistory('error', `❌ 레이어 ${layerIndex + 1} 오류: ${parsed.error}`);
-          return;
+        const response = await fetch(`/api/project/${projectId || currentProjectIdRef.current}`);
+        if (response.ok) {
+          const data = await response.json();
+          projectInfo = data.project;
         }
-      } catch (err) {
-        // JSON이 아닌 경우 계속 진행
+      } catch (error) {
+        log.error('프로젝트 정보 조회 실패', error);
       }
-
-      // 실제 메시지 조각 처리
-      let chunk = e.data;
-      let textPiece = '';
-
-      // ping 메시지 무시
-      if (chunk.includes('"type":"ping"')) {
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(chunk);
-        textPiece = parsed.choices?.[0]?.delta?.content || '';
-      } catch (err) {
-        console.log('Parse error:', err, chunk);
-        textPiece = '';
-      }
-
-      if (textPiece) {
-        fullHtml += textPiece;
-        setCharCount(prev => prev + textPiece.length);
-        
-        // 첫 번째 의미있는 HTML 태그가 완성될 때까지 기다림
-        if (!hasStartedReceiving && fullHtml.includes('<')) {
-          hasStartedReceiving = true;
-          setTimeout(() => {
-            const tempHtml = layerProgress.slice(0, layerIndex).map(p => p.html).join('\n') + fullHtml;
-            const fixedHtml = fixBrokenImages(tempHtml);
-            setHtmlCode(fixedHtml);
-            lastUpdateTime = Date.now();
-          }, 100);
-        } else if (hasStartedReceiving) {
-          smoothUpdateHtml();
-        }
-        
-        console.log('Updated layer HTML length:', fullHtml.length);
-      }
-    };
-
-    evtRef.current.onerror = (error) => {
-      console.error('EventSource error:', error);
-      evtRef.current.close();
-      setIsLoading(false);
-      setIsModifying(false);
-      addToChatHistory('error', `❌ 레이어 ${layerIndex + 1} 연결 오류가 발생했습니다.`);
-    };
-
-    evtRef.current.onopen = () => {
-      console.log('EventSource connected for layer', layerIndex + 1);
-    };
-  };
-
-  // ─── 컨텍스트를 포함한 페이지 생성 핸들러 ───────────────────────
-  const generatePageWithContext = (requestText, isModificationRequest = false, previousHtmlContext = '') => {
-    if (!requestText.trim()) return;
-
-    evtRef.current?.close();
-    setCharCount(0);
-    setIsLoading(true);
-    setIsModifying(isModificationRequest);
-    setErrorDetails(null);
+    }
     
-    updateWorkStatus('연결 준비 중', { requestText, isModificationRequest });
-
-    console.log('Generate with context:', {
-      requestText,
-      isModificationRequest,
-      hasPreviousContext: !!previousHtmlContext
-    });
-
-    // URL 파라미터로 전송
-    const params = new URLSearchParams({
-      message: requestText,
-      isModification: isModificationRequest.toString(),
-      currentHtml: isModificationRequest ? previousHtmlContext : ''
-    });
-
-    const url = `${API_BASE}/api/stream?${params.toString()}`;
-    console.log('Connecting to:', url);
-    addDebugLog('info', '서버 연결 시도', { url: url.substring(0, 100) + '...' });
-
-    evtRef.current = new EventSourcePolyfill(url);
-
-    let fullHtml = '';
-    let updateTimer = null;
-    let hasStartedReceiving = false;
-    let lastUpdateTime = 0;
-    let pingCount = 0;
+    // 수정 타입과 구체적인 값들 저장
+    const modificationType = plan.modificationType || 'general';
+    const specificValues = plan.modifications?.[0]?.specificValues || null;
     
-    // 연결 타임아웃 설정
-    const connectionTimeout = setTimeout(() => {
-      if (!hasStartedReceiving) {
-        addDebugLog('error', '연결 타임아웃 (30초)', { url });
-        evtRef.current?.close();
-        setIsLoading(false);
-        setIsModifying(false);
-        updateConnectionStatus('timeout');
-        setErrorDetails({
-          type: 'timeout',
-          message: '서버 연결 시간이 초과되었습니다.',
-          suggestion: '서버가 실행 중인지 확인하고 다시 시도해주세요.'
-        });
-      }
-    }, 30000);
+    // 수정 타입 한글 변환 (한 번만 정의)
+    const modTypeKorean = {
+      'color': '색상',
+      'layout': '레이아웃',
+      'content': '콘텐츠',
+      'style': '스타일',
+      'structure': '구조',
+      'navigation': '네비게이션',
+      'responsive': '반응형',
+      'functionality': '기능',
+      'mixed': '복합',
+      'general': '일반'
+    }[modificationType] || '일반';
     
-    // 더 부드러운 업데이트를 위한 함수
-    const smoothUpdateHtml = () => {
-      const now = Date.now();
-      // 최소 500ms 간격으로 업데이트 (blob URL 생성 부하 고려)
-      if (now - lastUpdateTime < 500) {
-        if (updateTimer) clearTimeout(updateTimer);
-        updateTimer = setTimeout(() => {
-          const fixedHtml = fixBrokenImages(fullHtml);
-          updateHtmlWithBlob(fixedHtml);
-          lastUpdateTime = Date.now();
-        }, 500);
-      } else {
-        const fixedHtml = fixBrokenImages(fullHtml);
-        updateHtmlWithBlob(fixedHtml);
-        lastUpdateTime = now;
-      }
-    };
-    
-    evtRef.current.onmessage = e => {
-      clearTimeout(connectionTimeout);
-      updateConnectionStatus('connected');
-      
-      console.log('Received raw data:', e.data);
-      addDebugLog('info', 'Raw 데이터 수신', { data: e.data.substring(0, 100) + '...' });
-      
-      // 계층적 생성 계획 수신 확인
-      if (e.data.startsWith('[HIERARCHICAL_PLAN]')) {
-        try {
-          const planData = JSON.parse(e.data.replace('[HIERARCHICAL_PLAN]', ''));
-          console.log('Received hierarchical plan:', planData);
-          addDebugLog('success', '계층적 생성 계획 수신', planData);
-          
-          updateWorkStatus('계층적 생성 계획 수립 완료');
-          
-          // 계층적 생성 초기화
-          initializeHierarchicalGeneration(planData);
-          
-          // 첫 번째 레이어 생성 시작
-          setTimeout(() => {
-            generateNextLayer(0);
-          }, 1000);
-          
-          return;
-        } catch (err) {
-          console.error('Failed to parse hierarchical plan:', err);
-          addDebugLog('error', '계층적 생성 계획 파싱 실패', err);
-        }
-      }
-      
-      // 스트림 끝
-      if (e.data === '[DONE]') {
-        evtRef.current.close();
-        updateConnectionStatus('completed');
-        updateWorkStatus('생성 완료');
-        
-        addDebugLog('success', '스트림 완료', { 
-          totalLength: fullHtml.length,
-          hasContent: !!fullHtml.trim()
-        });
-        
-        // 최종 HTML 설정 후 로딩 상태 해제 (이미지 수정 적용)
-        const finalFixedHtml = fixBrokenImages(fullHtml);
-        
-        if (finalFixedHtml.trim()) {
-          console.log('Setting final HTML with length:', finalFixedHtml.length);
-          addDebugLog('success', 'HTML 최종 설정', { length: finalFixedHtml.length });
-          
-          updateHtmlWithBlob(finalFixedHtml);
-          
-          // 부드러운 완료 전환
-          setTimeout(() => {
-            setIsLoading(false);
-            setIsModifying(false);
-            
-            // 완료 후 채팅 기록에 AI 응답 추가 (HTML과 함께)
-            console.log('About to add completion message with HTML length:', finalFixedHtml.length);
-            addToChatHistory('assistant', '✅ 완료되었습니다!', new Date(), finalFixedHtml);
-            
-          }, 200);
-          
-          // HTML이 있을 때만 저장
-          updateWorkStatus('결과 저장 중');
-          fetch(`${API_BASE}/api/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              prompt: requestText, 
-              html: finalFixedHtml,
-              isModification: isModificationRequest,
-              originalPrompt: requestText
-            })
-          })
-          .then(res => res.json())
-          .then(data => {
-            setPreviewId(data.id);
-            // 새로운 미리보기 ID를 히스토리에 추가
-            setPreviewIds(prev => {
-              const newIds = [...prev, data.id];
-              console.log('Added preview ID:', data.id, 'Total IDs:', newIds);
-              addDebugLog('success', '미리보기 저장 완료', { id: data.id });
-              return newIds;
-            });
-            updateWorkStatus('모든 작업 완료');
-          })
-          .catch(err => {
-            console.error('Save error:', err);
-            addDebugLog('error', '저장 실패', err);
-            updateWorkStatus('저장 실패 (생성은 완료됨)');
-          });
-        } else {
-          console.warn('No HTML content generated');
-          addDebugLog('warning', 'HTML 내용이 생성되지 않음');
-          updateWorkStatus('생성 실패 - 내용 없음');
-          setErrorDetails({
-            type: 'empty_response',
-            message: 'AI가 빈 응답을 반환했습니다.',
-            suggestion: '다른 방식으로 요청해보거나 서버 로그를 확인해주세요.'
-          });
-          
-          // 로딩 상태 해제
-          setIsLoading(false);
-          setIsModifying(false);
-        }
-        return;
-      }
-
-      // 진행률 정보 처리
-      if (e.data.startsWith('{"type":"progress"')) {
-        try {
-          const progressData = JSON.parse(e.data);
-          updateWorkStatus(`생성 중 (${progressData.chars}자)`);
-          addDebugLog('info', '진행률 업데이트', progressData);
-          return;
-        } catch (err) {
-          // 진행률 파싱 실패는 무시
-        }
-      }
-
-      // 상태 정보 처리
-      if (e.data.startsWith('{"type":"status"')) {
-        try {
-          const statusData = JSON.parse(e.data);
-          updateWorkStatus(statusData.message);
-          return;
-        } catch (err) {
-          // 상태 파싱 실패는 무시
-        }
-      }
-
-      // 에러 메시지 처리
-      try {
-        const parsed = JSON.parse(e.data);
-        if (parsed.error) {
-          evtRef.current.close();
-          setIsLoading(false);
-          setIsModifying(false);
-          updateConnectionStatus('error');
-          
-          const errorMsg = `❌ 오류: ${parsed.error}`;
-          addToChatHistory('error', errorMsg);
-          addDebugLog('error', 'API 오류', parsed);
-          updateWorkStatus('오류 발생');
-          setErrorDetails({
-            type: 'api_error',
-            message: parsed.error,
-            suggestion: 'API 키와 서버 설정을 확인해주세요.'
-          });
-          return;
-        }
-      } catch (err) {
-        // JSON이 아닌 경우 계속 진행
-      }
-
-      // 실제 메시지 조각 처리
-      let chunk = e.data;
-      let textPiece = '';
-
-      // ping 메시지 처리
-      if (chunk.includes('"type":"ping"')) {
-        pingCount++;
-        updateWorkStatus(`연결 유지 중 (ping ${pingCount})`);
-        addDebugLog('info', 'Ping 수신', { count: pingCount });
-        return;
-      }
-
-      // OpenAI 형식의 스트리밍 데이터 파싱
-      try {
-        const parsed = JSON.parse(chunk);
-        if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
-          textPiece = parsed.choices[0].delta.content || '';
-        }
-      } catch (err) {
-        // JSON 파싱 실패 시 원본 텍스트 사용 (서버에서 직접 텍스트를 보낼 수도 있음)
-        console.log('JSON 파싱 실패, 원본 텍스트 사용:', chunk.substring(0, 50));
-        addDebugLog('warning', 'JSON 파싱 실패, 원본 사용', { chunk: chunk.substring(0, 100) });
-        
-        // 특수 메시지가 아니면 HTML 콘텐츠로 취급
-        if (!chunk.startsWith('[') && !chunk.startsWith('{')) {
-          textPiece = chunk;
-        }
-      }
-
-      if (textPiece) {
-        fullHtml += textPiece;
-        setCharCount(prev => prev + textPiece.length);
-        
-        addDebugLog('info', 'HTML 조각 수신', { 
-          length: textPiece.length, 
-          totalLength: fullHtml.length,
-          sample: textPiece.substring(0, 50)
-        });
-        
-        // 첫 번째 의미있는 HTML 태그가 완성될 때까지 기다림
-        if (!hasStartedReceiving && fullHtml.includes('<')) {
-          hasStartedReceiving = true;
-          updateWorkStatus('HTML 생성 중');
-          addDebugLog('success', '첫 HTML 태그 수신');
-          
-          // 첫 렌더링은 약간 지연시켜 더 부드럽게
-          setTimeout(() => {
-            const fixedHtml = fixBrokenImages(fullHtml);
-            console.log('Setting initial HTML with length:', fixedHtml.length);
-            updateHtmlWithBlob(fixedHtml);
-            lastUpdateTime = Date.now();
-          }, 100);
-        } else if (hasStartedReceiving) {
-          // 이후에는 부드러운 업데이트 사용
-          smoothUpdateHtml();
-          updateWorkStatus(`HTML 생성 중 (${fullHtml.length}자)`);
-        }
-        
-        console.log('Updated HTML total length:', fullHtml.length);
-      }
-    };
-
-    evtRef.current.onerror = (error) => {
-      clearTimeout(connectionTimeout);
-      console.error('EventSource error:', error);
-      addDebugLog('error', 'EventSource 연결 오류', error);
-      
-      evtRef.current.close();
-      setIsLoading(false);
-      setIsModifying(false);
-      updateConnectionStatus('error');
-      updateWorkStatus('연결 오류');
-      
-      setErrorDetails({
-        type: 'connection_error',
-        message: '서버와의 연결에 문제가 발생했습니다.',
-        suggestion: '네트워크 연결과 서버 상태를 확인해주세요.'
+    if (plan.scope === 'all' && projectInfo && projectInfo.generationType === 'multi') {
+      log.info('모든 페이지 수정 시작', { 
+        pageCount: projectInfo.pages.length,
+        modificationType,
+        hasSpecificValues: !!specificValues
       });
       
-      addToChatHistory('error', '❌ 연결 오류가 발생했습니다. 다시 시도해주세요.');
-    };
-
-    evtRef.current.onopen = () => {
-      console.log('EventSource connected');
-      updateConnectionStatus('connected');
-      updateWorkStatus('서버 연결 완료, 응답 대기 중');
-      addDebugLog('success', 'EventSource 연결 성공');
-    };
-  };
-
-  // ─── AI 페이지 생성/수정 핸들러 ───────────────────────
-  const generateOrModifyPage = (isModification = false) => {
-    const requestText = isModification ? currentRequest : prompt;
-    if (!requestText.trim()) return;
-
-    // 채팅 기록에 사용자 요청 추가
-    addToChatHistory('user', requestText);
-
-    // 수정의 경우 현재 HTML을 컨텍스트로 전달
-    const contextHtml = isModification ? htmlCode : '';
-    
-    generatePageWithContext(requestText, isModification, contextHtml);
-    
-    // 현재 요청 입력창 초기화
-    if (isModification) {
-      setCurrentRequest('');
+      // 수정 진행 상태 설정
+      setCurrentProgress({
+        type: 'modification',
+        current: 0,
+        total: projectInfo.pages.length,
+        modificationType,
+        modificationPages: projectInfo.pages.map(p => ({
+          pageName: p.pageName,
+          description: `${p.pageName} 페이지 ${modTypeKorean} 수정`
+        }))
+      });
+      
+      // 모든 페이지에 대해 수정 실행
+      for (let i = 0; i < projectInfo.pages.length; i++) {
+        const pageInfo = projectInfo.pages[i];
+        
+        setWorkStatus(prev => ({ 
+          ...prev, 
+          currentWork: `페이지 ${i + 1}/${projectInfo.pages.length} 수정 중... (${pageInfo.pageName})`
+        }));
+        
+        setCurrentProgress(prev => ({
+          ...prev,
+          current: i
+        }));
+        
+        // 진행 상황을 채팅 버블로 업데이트
+        setChatHistory(prev => {
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage && lastMessage.isProgressUpdate) {
+            // 기존 진행 상황 메시지 업데이트
+            return [...prev.slice(0, -1), {
+              ...lastMessage,
+              content: `🔄 ${modTypeKorean} 수정 진행 중...\n\n📄 현재 작업: ${pageInfo.pageName} 페이지\n📋 진행률: ${i + 1}/${projectInfo.pages.length} (${Math.round(((i + 1) / projectInfo.pages.length) * 100)}%)\n⏱️ 시작 시간: ${lastMessage.timestamp}`,
+              timestamp: new Date().toLocaleTimeString()
+            }];
+          } else {
+            // 새 진행 상황 메시지 추가
+            return [...prev, {
+              type: 'assistant',
+              content: `🔄 ${modTypeKorean} 수정 진행 중...\n\n📄 현재 작업: ${pageInfo.pageName} 페이지\n📋 진행률: ${i + 1}/${projectInfo.pages.length} (${Math.round(((i + 1) / projectInfo.pages.length) * 100)}%)`,
+              timestamp: new Date().toLocaleTimeString(),
+              isProgressUpdate: true
+            }];
+          }
+        });
+        
+        try {
+          const pageResponse = await fetch(`/api/get-page/${projectInfo.id}/${pageInfo.pageName}`);
+          if (!pageResponse.ok) {
+            throw new Error(`페이지 로드 실패: ${pageInfo.pageName}`);
+          }
+          
+          const pageData = await pageResponse.json();
+          
+          await new Promise((resolve) => {
+            const params = new URLSearchParams({
+              message: modificationRequest,
+              isModification: 'true',
+              currentHtml: pageData.html,
+              modificationScope: 'all',
+              targetPageName: pageInfo.pageName,
+              projectId: projectInfo.id,
+              pageName: pageInfo.pageName
+            });
+            
+            // 수정 계획 전체를 전달
+            if (plan) {
+              params.append('modificationPlan', JSON.stringify(plan));
+            }
+            
+            const modificationEventSource = new EventSource(`/api/stream?${params}`);
+            
+            let modifiedHtml = '';
+            
+            modificationEventSource.onmessage = (event) => {
+              if (event.data === '[DONE]') {
+                modificationEventSource.close();
+                handleModificationComplete(modifiedHtml, modificationRequest, pageInfo, projectInfo.id);
+                resolve();
+                return;
+              }
+              
+              try {
+                const data = JSON.parse(event.data);
+                if (data.choices?.[0]?.delta?.content) {
+                  modifiedHtml += data.choices[0].delta.content;
+                }
+              } catch (error) {
+                if (event.data.includes('<!DOCTYPE html>') || event.data.includes('<html')) {
+                  modifiedHtml += event.data;
+                }
+              }
+            };
+            
+            modificationEventSource.onerror = () => {
+              modificationEventSource.close();
+              resolve();
+            };
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          log.error(`페이지 수정 실패: ${pageInfo.pageName}`, error);
+        }
+      }
+      
+      // 모든 수정 완료
+      setCurrentProgress(prev => ({
+        ...prev,
+        current: projectInfo.pages.length
+      }));
+      
+      setIsGenerating(false);
+      isExecutingPlanRef.current = false;
+      setWorkStatus(prev => ({ 
+        ...prev, 
+        currentWork: '모든 페이지 수정 완료!'
+      }));
+      
+      // 진행 상황 메시지 제거
+      setChatHistory(prev => prev.filter(msg => !msg.isProgressUpdate));
+      
+      // index 페이지의 HTML을 가져와서 htmlContent 업데이트
+      let indexHtml = '';
+      try {
+        const indexResponse = await fetch(`/api/get-page/${projectInfo.id}/index`);
+        if (indexResponse.ok) {
+          const indexData = await indexResponse.json();
+          indexHtml = indexData.html;
+          setHtmlContent(indexHtml);
+          log.info('멀티페이지 수정 후 index HTML 설정', {
+            projectId: projectInfo.id,
+            htmlLength: indexHtml.length,
+            firstChars: indexHtml.substring(0, 100)
+          });
+        }
+      } catch (error) {
+        log.error('index 페이지 가져오기 실패', error);
+      }
+      
+      setChatHistory(prev => [...prev, {
+        type: 'assistant',
+        content: `✅ 모든 페이지가 성공적으로 수정되었습니다!\n\n🎨 수정 타입: ${modTypeKorean}\n📄 수정된 페이지: ${projectInfo.pages.length}개\n⏱️ 완료 시간: ${new Date().toLocaleTimeString()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        previewUrl: `/preview/${projectInfo.id}`,
+        projectId: projectInfo.id,
+        generationType: 'multi',
+        modificationType,
+        htmlContent: indexHtml // index HTML을 저장하여 다음 수정에 사용
+      }]);
+      
+      setPreviewUrl(`/preview/${projectInfo.id}`);
+      updateIframePreview(`/preview/${projectInfo.id}`);
+      
+      // 멀티페이지 수정 완료 후 ref 관리
+      // currentProjectIdRef.current는 유지 (다음 수정을 위해)
+      // currentPageIdRef.current는 null로 설정 (멀티페이지이므로)
+      currentPageIdRef.current = null;
+      isModificationRef.current = false;
+      
+      log.info('멀티페이지 수정 완료 - 상태 확인', {
+        projectId: currentProjectIdRef.current,
+        htmlContentLength: htmlContent?.length || 0,
+        hasHtmlContent: !!htmlContent
+      });
+      isModificationRef.current = false;
+      
+    } else if (plan.scope === 'specific' && plan.affectedPages.length > 0) {
+      log.info('특정 페이지 수정', { 
+        pages: plan.affectedPages,
+        modificationType
+      });
+      
+      // 특정 페이지들에 대해서도 동일한 방식으로 수정
+      // ... (위와 유사한 로직을 plan.affectedPages에 대해 적용)
+      
+    } else {
+      log.info('현재 페이지만 수정', { modificationType });
+      
+      // 단일 페이지 수정 진행 상태 표시
+      setCurrentProgress({
+        type: 'modification',
+        current: 0,
+        total: 1,
+        modificationType,
+        modificationPages: [{
+          pageName: '현재 페이지',
+          description: `${modTypeKorean} 수정 중...`
+        }]
+      });
+      
+      // 단일 페이지 수정 진행 상황 채팅 버블 추가
+      setChatHistory(prev => [...prev, {
+        type: 'assistant',
+        content: `🔄 ${modTypeKorean} 수정 진행 중...\n\n📄 현재 작업: 현재 페이지\n📋 진행률: 1/1 (100%)`,
+        timestamp: new Date().toLocaleTimeString(),
+        isProgressUpdate: true
+      }]);
+      
+      // 직접 수정 실행 (계획 재수립 방지)
+      const params = new URLSearchParams({
+        message: modificationRequest,
+        isModification: 'true',
+        currentHtml: htmlContent,
+        modificationScope: 'single',
+        projectId: currentProjectIdRef.current || '',
+        pageId: currentPageIdRef.current || '',
+        pageName: 'index',
+        modificationPlan: JSON.stringify(plan)
+      });
+      
+      startStreaming(modificationRequest, {
+        isModification: true,
+        currentHtml: htmlContent,
+        modificationScope: 'single',
+        modificationPlan: plan
+      });
+      
+      isExecutingPlanRef.current = false;
     }
   };
 
-  // ─── 새 페이지 생성 핸들러 ────────────────────────────
-  const generatePage = () => {
-    generateOrModifyPage(false);
+  const handleModificationComplete = async (html, prompt, pageInfo, projectId) => {
+    try {
+      const saveResponse = await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          html,
+          projectId,
+          pageName: pageInfo.pageName,
+          isModification: true,
+          generationType: 'multi'
+        })
+      });
+      
+      if (!saveResponse.ok) {
+        throw new Error('페이지 저장 실패');
+      }
+      
+      log.info(`페이지 수정 완료: ${pageInfo.pageName}`);
+      
+    } catch (error) {
+      log.error('페이지 저장 오류', error);
+    }
   };
 
-  // ─── 페이지 수정 핸들러 ────────────────────────────────
-  const modifyPage = () => {
-    if (!htmlCode.trim()) {
-      alert('수정할 페이지가 없습니다. 먼저 페이지를 생성해주세요.');
+  const handleGenerationComplete = async (html, prompt, config) => {
+    try {
+      log.info('생성 완료 처리', { 
+        planType: config.planType,
+        pageIndex: config.pageIndex,
+        currentProjectId: currentProjectIdRef.current,
+        isModification: config.isModification
+      });
+
+      const plan = currentPlanRef.current;
+      
+      const saveResponse = await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          html,
+          projectId: currentProjectIdRef.current || null,
+          pageId: config.isModification ? currentPageIdRef.current : null,
+          projectName: plan?.projectName || 'Untitled Project',
+          projectDescription: plan?.description || 'Generated website',
+          generationType: config.planType || 'single',
+          pageName: config.pageName || 'index',
+          pageType: config.pageIndex === 0 ? 'main' : 'sub',
+          sectionIndex: config.sectionIndex,
+          totalSections: config.totalSections,
+          plannedPages: plan?.plannedPages || [],
+          isModification: config.isModification || false
+          // Base44 모드에서는 modificationPlan 사용하지 않음
+        })
+      });
+
+      if (!saveResponse.ok) {
+        const errorData = await saveResponse.json();
+        throw new Error(errorData.error || `HTTP error! status: ${saveResponse.status}`);
+      }
+
+      const saveData = await saveResponse.json();
+      
+      if (saveData.success) {
+        if (!currentProjectIdRef.current && saveData.projectId) {
+          currentProjectIdRef.current = saveData.projectId;
+          setProjectId(saveData.projectId);
+          log.info(`프로젝트 ID 설정: ${saveData.projectId}`);
+        }
+
+        const finalProjectId = currentProjectIdRef.current || saveData.projectId;
+        const finalPageId = saveData.id;
+        
+        // 수정 작업인 경우
+        if (config.isModification) {
+          setHtmlContent(html);
+          setIsGenerating(false);
+          setWorkStatus(prev => ({ 
+            ...prev, 
+            currentWork: '수정 완료!',
+            lastActivity: new Date()
+          }));
+          
+          // 수정된 결과를 채팅 기록에 추가
+          const modPlan = config.modificationPlan;
+          const modTypeKorean = modPlan ? {
+            'color': '색상',
+            'layout': '레이아웃',
+            'content': '콘텐츠',
+            'style': '스타일',
+            'structure': '구조',
+            'navigation': '네비게이션',
+            'responsive': '반응형',
+            'functionality': '기능',
+            'mixed': '복합',
+            'general': '일반'
+          }[modPlan.modificationType || 'general'] || '일반' : '일반';
+          
+          setChatHistory(prev => [...prev, {
+            type: 'assistant',
+            content: `✅ HTML 페이지가 성공적으로 수정되었습니다!\n\n🎨 수정 타입: ${modTypeKorean}\n⏱️ 완료 시간: ${new Date().toLocaleTimeString()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            generationType: config.planType || 'single',
+            projectId: finalProjectId,
+            pageId: finalPageId,
+            previewUrl: currentPageIdRef.current ? `/preview/${currentPageIdRef.current}` : `/preview/${finalPageId}`,
+            htmlContent: html,
+            modificationType: modPlan?.modificationType
+          }]);
+          
+          // 미리보기 URL 업데이트
+          const modifiedPreviewUrl = currentPageIdRef.current 
+            ? `/preview/${currentPageIdRef.current}` 
+            : `/preview/${finalPageId}`;
+          
+          log.info('수정 완료 후 미리보기 URL 설정', { 
+            modifiedPreviewUrl,
+            currentPageId: currentPageIdRef.current,
+            finalPageId 
+          });
+          
+          setPreviewUrl(modifiedPreviewUrl);
+          
+          // iframe 업데이트
+          setTimeout(() => {
+            updateIframePreview(modifiedPreviewUrl);
+          }, 500);
+          
+          // 수정 작업 완료 후 진행 상황 리셋
+          setCurrentProgress({
+            type: null,
+            current: 0,
+            total: 0,
+            results: []
+          });
+          
+          // 진행 상황 메시지 제거
+          setChatHistory(prev => prev.filter(msg => !msg.isProgressUpdate));
+          
+          // 수정 작업 완료 후에도 계속 수정 가능하도록 ref 유지
+          // 단일 페이지의 경우 currentPageIdRef 유지
+          isModificationRef.current = false;
+          
+          return; // 수정 작업은 여기서 종료
+        }
+        
+        // 새 생성 작업인 경우
+        if (!currentPageIdRef.current) {
+          currentPageIdRef.current = finalPageId;
+        }
+        
+        if (config.planType === 'multi' && plan) {
+          const isLastPage = config.pageIndex === plan.plan.pages.length - 1;
+          if (isLastPage) {
+            try {
+              const indexResponse = await fetch(`/api/get-page/${finalProjectId}/index`);
+              if (indexResponse.ok) {
+                const indexData = await indexResponse.json();
+                setHtmlContent(indexData.html);
+              }
+            } catch (error) {
+              log.error('index 페이지 가져오기 실패', error);
+            }
+          }
+        } else if (!config.planType || config.planType === 'single') {
+          setHtmlContent(html);
+        }
+        
+        setCurrentProgress(prev => {
+          const newResults = [...prev.results, {
+            index: prev.current,
+            id: saveData.id,
+            html,
+            prompt,
+            pageName: config.pageName
+          }];
+          
+          const updatedProgress = {
+            ...prev,
+            current: prev.current + 1,
+            results: newResults
+          };
+          
+          log.info('진행 상황 업데이트', {
+            current: updatedProgress.current,
+            total: updatedProgress.total
+          });
+          
+          return updatedProgress;
+        });
+
+        if (config.planType === 'multi' && plan) {
+          const nextIndex = config.pageIndex + 1;
+          if (nextIndex < plan.plan.pages.length) {
+            setTimeout(() => {
+              startStreaming(plan.plan.pages[nextIndex].prompt, {
+                planType: 'multi',
+                pageIndex: nextIndex,
+                totalPages: plan.plan.pages.length,
+                pageName: plan.plan.pages[nextIndex].pageName
+              });
+            }, 100);
+          } else {
+            finalizeGeneration(finalProjectId, 'multi');
+          }
+        } else if (config.planType === 'long' && plan) {
+          const nextIndex = config.sectionIndex + 1;
+          if (nextIndex < plan.plan.sections.length) {
+            setTimeout(() => {
+              startStreaming(plan.plan.sections[nextIndex].prompt, {
+                planType: 'long',
+                sectionIndex: nextIndex,
+                totalSections: plan.plan.sections.length,
+                currentHtml: html
+              });
+            }, 100);
+          } else {
+            finalizeGeneration(saveData.id, 'long', html);
+          }
+        } else if (config.planType === 'hierarchical' && plan) {
+          const nextIndex = config.layerIndex + 1;
+          if (nextIndex < plan.plan.layers.length) {
+            setTimeout(() => {
+              startStreaming(plan.plan.layers[nextIndex].prompt, {
+                planType: 'hierarchical',
+                layerIndex: nextIndex,
+                totalLayers: plan.plan.layers.length,
+                currentHtml: html
+              });
+            }, 100);
+          } else {
+            finalizeGeneration(saveData.id, 'hierarchical', html);
+          }
+        } else {
+          finalizeGeneration(saveData.id, config.planType || 'single', html);
+        }
+      } else {
+        throw new Error(saveData.error || '저장 실패');
+      }
+    } catch (error) {
+      log.error('생성 완료 처리 오류', {
+        error: error.message
+      });
+      
+      setIsGenerating(false);
+      setStatus(`오류 발생: ${error.message}`);
+      setChatHistory(prev => [...prev, {
+        type: 'error',
+        content: `처리 중 오류가 발생했습니다: ${error.message}`,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+    }
+  };
+
+  const finalizeGeneration = async (finalId, generationType, html = null) => {
+    log.info('finalizeGeneration 시작', {
+      finalId,
+      generationType,
+      hasHtml: !!html,
+      htmlLength: html?.length
+    });
+    
+    setIsGenerating(false);
+    setWorkStatus(prev => ({ 
+      ...prev, 
+      currentWork: '완료!',
+      lastActivity: new Date()
+    }));
+    
+    // 진행 상황 메시지 제거
+    setChatHistory(prev => prev.filter(msg => !msg.isProgressUpdate));
+
+    const timestamp = new Date().toLocaleTimeString();
+    let previewLink = '';
+    let statusMessage = '';
+    
+    const finalProgress = { ...currentProgress };
+    
+    // 멀티페이지의 경우 index HTML 가져오기
+    let multiPageIndexHtml = null;
+    
+    switch (generationType) {
+      case 'multi':
+        previewLink = `/preview/${finalId}`;
+        statusMessage = `멀티 페이지 웹사이트가 생성되었습니다! 총 ${finalProgress.total}개 페이지가 생성되었습니다.`;
+        
+        // 멀티페이지 생성 완료 시 index HTML 가져오기
+        try {
+          const indexResponse = await fetch(`/api/get-page/${finalId}/index`);
+          if (indexResponse.ok) {
+            const indexData = await indexResponse.json();
+            multiPageIndexHtml = indexData.html;
+            setHtmlContent(multiPageIndexHtml);
+            log.info('멀티페이지 생성 완료 후 index HTML 설정', {
+              projectId: finalId,
+              htmlLength: multiPageIndexHtml.length,
+              firstChars: multiPageIndexHtml.substring(0, 100)
+            });
+          }
+        } catch (error) {
+          log.error('멀티페이지 생성 후 index HTML 로드 실패', error);
+        }
+        break;
+      case 'long':
+        previewLink = `/preview/${finalId}`;
+        statusMessage = `긴 페이지가 생성되었습니다! 총 ${finalProgress.total}개 섹션으로 구성되었습니다.`;
+        break;
+      case 'hierarchical':
+        previewLink = `/preview/${finalId}`;
+        statusMessage = `계층적 생성이 완료되었습니다! 총 ${finalProgress.total}개 레이어로 생성되었습니다.`;
+        break;
+      default:
+        previewLink = `/preview/${finalId}`;
+        statusMessage = 'HTML 페이지가 생성되었습니다!';
+        if (html) {
+          setHtmlContent(html);
+        }
+    }
+    
+    log.info('미리보기 링크 생성', {
+      generationType,
+      finalId,
+      previewLink
+    });
+    
+    setPreviewUrl(previewLink);
+    setStatus(statusMessage);
+    
+    setTimeout(() => {
+      log.info('미리보기 업데이트 시도', { previewLink });
+      updateIframePreview(previewLink);
+    }, 1000);
+    
+    log.info('생성 완료', {
+      type: generationType,
+      id: finalId,
+      previewUrl: previewLink,
+      totalGenerated: finalProgress.total
+    });
+    
+    setChatHistory(prev => [...prev, {
+      type: 'assistant',
+      content: statusMessage,
+      timestamp,
+      generationType,
+      projectId: generationType === 'multi' ? finalId : null,
+      pageId: generationType !== 'multi' ? finalId : null,
+      previewUrl: previewLink,
+      htmlContent: generationType === 'multi' ? multiPageIndexHtml : html,
+      progress: finalProgress,
+      originalPrompt: lastPromptRef.current // 원본 프롬프트 저장
+    }]);
+
+    setGenerationPlan(null);
+    setCurrentProgress({
+      type: null,
+      current: 0,
+      total: 0,
+      results: []
+    });
+    currentPlanRef.current = null;
+    // finalizeGeneration에서 ref 초기화 제거 - 수정 작업을 위해 유지
+    // currentProjectIdRef.current = null;
+    // currentPageIdRef.current = null;
+  };
+
+  const updateIframePreview = (url) => {
+    log.info('updateIframePreview 시작', { 
+      url,
+      hasIframe: !!iframeRef.current,
+      currentSrc: iframeRef.current?.src
+    });
+    
+    if (!iframeRef.current) {
+      log.error('iframe ref가 없습니다');
       return;
     }
-    generateOrModifyPage(true);
+    
+    log.debug('iframe 초기화');
+    iframeRef.current.src = 'about:blank';
+    
+    setTimeout(() => {
+      if (iframeRef.current) {
+        let fullUrl;
+        if (url.startsWith('http')) {
+          fullUrl = url;
+        } else if (import.meta.env.DEV) {
+          fullUrl = `${window.location.origin}${url}`;
+        } else {
+          fullUrl = `${window.location.origin}${url}`;
+        }
+        
+        log.info('iframe src 설정', { 
+          url,
+          fullUrl,
+          origin: window.location.origin,
+          isDev: import.meta.env.DEV
+        });
+        
+        iframeRef.current.src = fullUrl;
+        log.info('iframe src 설정 완료', { fullUrl });
+        
+        setTimeout(() => {
+          if (iframeRef.current && iframeRef.current.src === fullUrl) {
+            const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+            if (iframeDoc && iframeDoc.title === 'Only Idea') {
+              log.warn('React 앱이 로드됨 - 프록시 설정 확인 필요');
+              setIframeError(true);
+            }
+          }
+        }, 2000);
+      }
+    }, 100);
+    
+    setTimeout(() => {
+      if (iframeError && url) {
+        log.warn('iframe 로드 실패, 새 창에서 열기 제안', { url });
+      }
+    }, 3000);
   };
 
-  // ─── 새로 시작하기 핸들러 ─────────────────────────────
-  const startNew = () => {
-    if (confirm('새로 시작하시겠습니까? 현재 작업 내용이 사라집니다.')) {
-      setHtmlCode('');
-      setChatHistory([]);
-      setHtmlHistory([]);
-      setCurrentHistoryIndex(-1);
-      setPreviewIds([]);
-      setPreviewId('');
-      setPrompt('');
-      setCurrentRequest('');
+  const handleSend = () => {
+    if (!chatInput.trim() || isGenerating) return;
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const isModification = !!htmlContent && currentProgress.type === null;
+    
+    log.info('handleSend 호출', {
+      isModification,
+      hasHtmlContent: !!htmlContent,
+      htmlContentLength: htmlContent?.length || 0,
+      currentProjectId: currentProjectIdRef.current,
+      currentPageId: currentPageIdRef.current,
+      currentProgressType: currentProgress.type,
+      chatInput: chatInput.substring(0, 50) + '...'
+    });
+    
+    setChatHistory(prev => [...prev, {
+      type: 'user',
+      content: chatInput,
+      timestamp
+    }]);
+    
+    if (isModification) {
+      // 수정 모드 - 이전 프롬프트와 함께 재생성
+      log.info('수정 모드 - 재생성 시작', {
+        request: chatInput,
+        hasOriginalPrompt: !!lastPromptRef.current
+      });
       
-      // 계층적 생성 상태 초기화
-      setIsHierarchicalGeneration(false);
-      setCurrentLayer(0);
-      setTotalLayers(0);
-      setLayerProgress([]);
-      setHierarchicalPlan(null);
+      // 원본 프롬프트 찾기
+      let originalPrompt = lastPromptRef.current || '';
       
-      evtRef.current?.close();
-      setIsLoading(false);
-      setIsModifying(false);
+      // chatHistory에서 가장 최근 성공한 생성의 원본 프롬프트 찾기
+      for (let i = chatHistory.length - 1; i >= 0; i--) {
+        const item = chatHistory[i];
+        if (item.type === 'assistant' && item.originalPrompt) {
+          originalPrompt = item.originalPrompt;
+          break;
+        }
+      }
+      
+      if (!originalPrompt) {
+        // 원본 프롬프트를 찾을 수 없는 경우
+        setChatHistory(prev => [...prev, {
+          type: 'error',
+          content: '원본 요청을 찾을 수 없습니다. 새로운 요청으로 시작해주세요.',
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+        setChatInput('');
+        return;
+      }
+      
+      // 수정 요청 안내 메시지
+      setChatHistory(prev => [...prev, {
+        type: 'assistant',
+        content: '이전 요청과 수정사항을 반영하여 재생성합니다...',
+        timestamp: new Date().toLocaleTimeString(),
+        isProgressUpdate: true
+      }]);
+      
+      // 원본 프롬프트와 수정 요청을 결합
+      const combinedPrompt = `${originalPrompt}\n\n다음 수정사항을 적용해주세요:\n${chatInput}`;
+      
+      // 재생성 시작
+      lastPromptRef.current = combinedPrompt;
+      setCurrentViewIndex(-1);
+      setIframeError(false);
+      isModificationRef.current = false;
+      isExecutingPlanRef.current = false;
+      
+      // 원본 프롬프트도 함께 전달
+      startStreaming(combinedPrompt, {
+        originalPrompt: originalPrompt,
+        modificationRequest: chatInput,
+        isRegeneration: true
+      });
+    } else {
+      // 생성 모드 - 하지만 새 프로젝트가 아니라면 추가 요청일 수 있음
+      lastPromptRef.current = chatInput;
+      setCurrentViewIndex(-1);
+      setIframeError(false);
+      isModificationRef.current = false;
+      isExecutingPlanRef.current = false;
+      
+      // 새 프로젝트 버튼을 누른 경우가 아니라면 ref 유지
+      // 사용자가 명시적으로 새 프로젝트를 시작한 경우에만 초기화
+      log.info('생성 모드 - 기존 ref 유지', {
+        currentProjectId: currentProjectIdRef.current,
+        currentPageId: currentPageIdRef.current
+      });
+      
+      startStreaming(chatInput);
+    }
+    
+    setChatInput('');
+  };
+
+  const handleChatItemClick = async (item, index) => {
+    log.info('채팅 항목 클릭', {
+      index,
+      type: item.type,
+      hasPreviewUrl: !!item.previewUrl,
+      hasHtmlContent: !!item.htmlContent,
+      generationType: item.generationType
+    });
+    
+    if (item.type === 'assistant') {
+      setCurrentViewIndex(index);
+      
+      if (item.previewUrl) {
+        log.info('이전 결과 미리보기 URL 설정', { 
+          previewUrl: item.previewUrl 
+        });
+        setPreviewUrl(item.previewUrl);
+        updateIframePreview(item.previewUrl);
+      }
+      
+      // 멀티페이지 프로젝트의 경우 index 페이지 HTML 가져오기
+      if (item.generationType === 'multi' && item.projectId) {
+        // 멀티페이지는 htmlContent가 있어도 항상 최신 index HTML을 가져옴
+        try {
+          const indexResponse = await fetch(`/api/get-page/${item.projectId}/index`);
+          if (indexResponse.ok) {
+            const indexData = await indexResponse.json();
+            setHtmlContent(indexData.html);
+            log.info('멀티페이지 프로젝트 index HTML 로드', {
+              projectId: item.projectId,
+              htmlLength: indexData.html.length
+            });
+          }
+        } catch (error) {
+          log.error('index 페이지 로드 실패', error);
+          // 실패해도 저장된 htmlContent가 있으면 사용
+          if (item.htmlContent) {
+            setHtmlContent(item.htmlContent);
+          } else {
+            setHtmlContent('');
+          }
+        }
+      } else if (item.htmlContent) {
+        setHtmlContent(item.htmlContent);
+        log.info('HTML 콘텐츠 설정', { 
+          length: item.htmlContent.length 
+        });
+      } else {
+        // htmlContent가 없는 경우 빈 문자열로 설정
+        setHtmlContent('');
+      }
+      
+      // 페이지 ID 업데이트
+      if (item.pageId) {
+        currentPageIdRef.current = item.pageId;
+      } else {
+        currentPageIdRef.current = null;
+      }
+      
+      if (item.projectId) {
+        currentProjectIdRef.current = item.projectId;
+      } else {
+        currentProjectIdRef.current = null;
+      }
+      
+      log.info('이전 결과 미리보기 완료', { 
+        type: item.generationType,
+        previewUrl: item.previewUrl,
+        pageId: item.pageId,
+        projectId: item.projectId,
+        hasHtmlContent: !!item.htmlContent || (item.generationType === 'multi' && item.projectId)
+      });
     }
   };
 
-  // ─── 리사이저 이벤트 바인딩 ────────────────────────────
-  useEffect(() => {
-    const onMouseMove = e => {
-      if (!isResizing.current) return;
-      const { left, width } = containerRef.current.getBoundingClientRect();
-      let pct = ((e.clientX - left) / width) * 100;
-      pct = Math.max(20, Math.min(80, pct));
-      setLeftWidth(pct);
-    };
-    const onMouseUp = () => {
-      if (isResizing.current) {
-        isResizing.current = false;
-        document.body.style.cursor = '';
+  const handleDownload = async (item) => {
+    try {
+      let downloadUrl = '';
+      
+      if (item.generationType === 'multi' && item.projectId) {
+        downloadUrl = `/api/download/project/${item.projectId}`;
+      } else if (item.pageId) {
+        downloadUrl = `/api/download/${item.pageId}`;
       }
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, []);
-
-  const startResize = e => {
-    e.preventDefault();
-    isResizing.current = true;
-    document.body.style.cursor = 'ew-resize';
+      
+      if (!downloadUrl) {
+        log.error('다운로드 URL을 생성할 수 없습니다');
+        return;
+      }
+      
+      log.info('다운로드 시작', { url: downloadUrl });
+      
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = item.generationType === 'multi' ? 'website.zip' : 'index.html';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (error) {
+      log.error('다운로드 오류', error);
+      alert('다운로드 중 오류가 발생했습니다.');
+    }
   };
 
-  // ─── 렌더 ───────────────────────────────────────────────
-  return (
-    <div ref={containerRef} className={`ai-builder-container ${theme}`}>
-      {/* 테마 토글 */}
-      <div className="theme-toggle">
-        <input
-          type="checkbox"
-          id="themeSwitch"
-          checked={theme === 'light'}
-          onChange={toggleTheme}
-        />
-        <label htmlFor="themeSwitch" />
-      </div>
+  const handleNewProject = () => {
+    if (isGenerating) return;
+    
+    setChatInput('');
+    setHtmlContent('');
+    setPreviewUrl('');
+    setStatus('');
+    setChatHistory([]);
+    setGeneratedChars(0);
+    setCurrentViewIndex(-1);
+    setGenerationPlan(null);
+    setCurrentProgress({
+      type: null,
+      current: 0,
+      total: 0,
+      results: []
+    });
+    setProjectId(null);
+    setIframeError(false);
+    currentPlanRef.current = null;
+    currentProjectIdRef.current = null;
+    currentPageIdRef.current = null;
+    isModificationRef.current = false;
+    isExecutingPlanRef.current = false;
+    
+    if (iframeRef.current) {
+      iframeRef.current.src = 'about:blank';
+    }
+    
+    log.info('새 프로젝트 시작');
+  };
 
-      {/* 왼쪽 입력 패널 */}
-      <div className="panel input-panel" style={{ width: `${leftWidth}%` }}>
+  const clearDebugLogs = () => {
+    setDebugLogs([]);
+  };
+
+  const handleMouseDown = (e) => {
+    setIsResizing(true);
+    e.preventDefault();
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isResizing) return;
+    
+    const containerWidth = document.querySelector('.ai-builder-container').offsetWidth;
+    const newWidth = (e.clientX / containerWidth) * 100;
+    
+    if (newWidth >= 20 && newWidth <= 80) {
+      setLeftPanelWidth(newWidth);
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsResizing(false);
+  };
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isResizing]);
+
+  const renderProgress = () => {
+    if (!currentProgress.type || currentProgress.total === 0) return null;
+
+    const items = [];
+    let title = '';
+    let itemType = '';
+    let progressClass = currentProgress.type;
+
+    switch (currentProgress.type) {
+      case 'multi':
+        title = '멀티 페이지 생성 진행 중';
+        itemType = '페이지';
+        items.push(...(generationPlan?.plan?.pages || []));
+        break;
+      case 'long':
+        title = '긴 페이지 생성 진행 중';
+        itemType = '섹션';
+        items.push(...(generationPlan?.plan?.sections || []));
+        break;
+      case 'hierarchical':
+        title = '계층적 생성 진행 중';
+        itemType = '레이어';
+        items.push(...(generationPlan?.plan?.layers || []));
+        break;
+      case 'modification':
+        const modType = currentProgress.modificationType || 'general';
+        const modTypeKorean = {
+          'color': '색상',
+          'layout': '레이아웃',
+          'content': '콘텐츠',
+          'style': '스타일',
+          'structure': '구조',
+          'navigation': '네비게이션',
+          'responsive': '반응형',
+          'functionality': '기능',
+          'mixed': '복합',
+          'general': '일반'
+        }[modType] || '일반';
+        
+        title = `${modTypeKorean} 수정 작업 진행 중`;
+        itemType = '페이지';
+        items.push(...(currentProgress.modificationPages || []));
+        break;
+    }
+
+    return (
+      <div className={`${progressClass}-progress`}>
+        <div className={`${progressClass}-header`}>
+          <h3>{title}</h3>
+          <div className={`${itemType.toLowerCase()}-counter`}>
+            {currentProgress.current + 1} / {currentProgress.total}
+          </div>
+        </div>
+        <div className={`${itemType.toLowerCase()}-progress-list`}>
+          {items.map((item, index) => (
+            <div 
+              key={index} 
+              className={`${itemType.toLowerCase()}-item ${
+                index < currentProgress.current ? 'completed' :
+                index === currentProgress.current ? 'current' : 'pending'
+              }`}
+            >
+              <div className={`${itemType.toLowerCase()}-status`}>
+                {index < currentProgress.current ? '✅' :
+                 index === currentProgress.current ? '🔄' : '⏳'}
+              </div>
+              <div className={`${itemType.toLowerCase()}-info`}>
+                <div className={`${itemType.toLowerCase()}-name`}>
+                  {item.title || item.sectionName || item.name || item.pageName}
+                  {item.pageName && ` (${item.pageName})`}
+                </div>
+                <div className={`${itemType.toLowerCase()}-description`}>
+                  {item.description || ''}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="ai-builder-container">
+      <div className="panel input-panel" style={{ width: `${leftPanelWidth}%` }}>
         <div className="panel-header">
-          <h1 className="title">AI Web Builder</h1>
-          <button className="btn-new" onClick={startNew} disabled={isLoading}>
-            새로 시작
+          <h1 className="title">Only Idea</h1>
+          <button 
+            className="btn-new" 
+            onClick={handleNewProject}
+            disabled={isGenerating}
+          >
+            새 프로젝트
           </button>
         </div>
 
-        {/* 초기 프롬프트 (페이지가 없을 때만 표시) */}
-        {!htmlCode && (
-          <div className="initial-prompt-section">
-            <textarea
-              className="prompt-input"
-              placeholder="예: HTML/CSS로 반응형 프로필 카드 만들어 줘&#10;&#10;💡 복잡한 웹사이트의 경우 자동으로 계층적 생성을 사용합니다"
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              disabled={isLoading}
-            />
-            <button
-              className="btn-generate"
-              onClick={generatePage}
-              disabled={isLoading || !prompt.trim()}
-            >
-              {isLoading ? '생성 중...' : '웹페이지 생성'}
-            </button>
-          </div>
-        )}
-
-        {/* 작업 상태 패널 */}
         <div className="work-status-panel">
           <div className="status-header">
-            <h3>🔄 작업 상태</h3>
-            <div className={`connection-indicator ${connectionStatus}`}>
+            <h3>작업 상태</h3>
+            <div className={`connection-indicator ${
+              workStatus.isConnected ? 'connected' : 
+              workStatus.error ? 'error' : 'disconnected'
+            }`}>
               <span className="connection-dot"></span>
-              {connectionStatus === 'connected' && '연결됨'}
-              {connectionStatus === 'disconnected' && '연결 끊김'}
-              {connectionStatus === 'error' && '오류'}
-              {connectionStatus === 'timeout' && '시간초과'}
-              {connectionStatus === 'completed' && '완료'}
+              {workStatus.isConnected ? '연결됨' : 
+               workStatus.error ? '오류' : '연결 끊김'}
             </div>
           </div>
-          
-          <div className="current-work">
-            <div className="work-text">{workStatus}</div>
-            {lastActivity && (
-              <div className="last-activity">
-                마지막 활동: {lastActivity.toLocaleTimeString()}
-              </div>
-            )}
-          </div>
 
-          {errorDetails && (
+          {workStatus.currentWork && (
+            <div className="current-work">
+              <div className="work-text">{workStatus.currentWork}</div>
+              {workStatus.lastActivity && (
+                <div className="last-activity">
+                  마지막 활동: {workStatus.lastActivity.toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+          )}
+
+          {workStatus.error && (
             <div className="error-details">
-              <div className="error-message">❌ {errorDetails.message}</div>
-              <div className="error-suggestion">💡 {errorDetails.suggestion}</div>
+              <div className="error-message">오류: {workStatus.error}</div>
+              <div className="error-suggestion">
+                API 키 설정을 확인하거나 서버 연결을 확인해주세요.
+              </div>
             </div>
           )}
 
           <div className="debug-controls">
             <button 
               className="btn-debug-toggle"
-              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              onClick={() => setShowDebug(!showDebug)}
             >
-              {showDebugPanel ? '🔍 디버그 숨기기' : '🔍 디버그 보기'}
+              디버그 {showDebug ? '숨기기' : '보기'}
             </button>
-            
-            {debugLogs.length > 0 && (
-              <button 
-                className="btn-clear-logs"
-                onClick={() => setDebugLogs([])}
-              >
-                🗑️ 로그 지우기
-              </button>
+            {showDebug && (
+              <>
+                <button 
+                  className="btn-clear-logs"
+                  onClick={clearDebugLogs}
+                >
+                  로그 지우기
+                </button>
+                <button 
+                  className="btn-download-logs"
+                  onClick={downloadLogs}
+                >
+                  로그 다운로드
+                </button>
+              </>
             )}
+            <button 
+              className="btn-test-connection"
+              onClick={testConnection}
+              disabled={isGenerating}
+            >
+              연결 테스트
+            </button>
           </div>
 
-          {showDebugPanel && (
+          {showDebug && (
             <div className="debug-panel">
               <div className="debug-header">
-                <h4>디버그 로그 ({debugLogs.length})</h4>
+                <h4>디버그 로그</h4>
               </div>
               <div className="debug-logs">
-                {debugLogs.slice(-10).map((log, index) => (
-                  <div key={index} className={`debug-log ${log.type}`}>
-                    <span className="log-time">{log.timestamp}</span>
-                    <span className="log-type">[{log.type.toUpperCase()}]</span>
-                    <span className="log-message">{log.message}</span>
-                    {log.data && (
-                      <details className="log-data">
-                        <summary>데이터 보기</summary>
-                        <pre>{JSON.stringify(log.data, null, 2)}</pre>
-                      </details>
-                    )}
-                  </div>
-                ))}
-                {debugLogs.length === 0 && (
+                {debugLogs.length === 0 ? (
                   <div className="no-logs">로그가 없습니다</div>
+                ) : (
+                  debugLogs.map(log => (
+                    <div key={log.id} className={`debug-log ${log.type}`}>
+                      <span className="log-time">{log.time}</span>
+                      <span className="log-type">[{log.type.toUpperCase()}]</span>
+                      <div className="log-message">
+                        {log.message}
+                        {log.data && (
+                          <details className="log-data">
+                            <summary>상세 정보</summary>
+                            <pre>{JSON.stringify(log.data, null, 2)}</pre>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
           )}
         </div>
-        {isHierarchicalGeneration && (
-          <div className="hierarchical-progress">
-            <div className="hierarchical-header">
-              <h3>🏗️ 계층적 생성 진행 중</h3>
-              <div className="layer-counter">
-                {currentLayer + 1} / {totalLayers} 단계
-              </div>
-            </div>
-            <div className="layer-progress-list">
-              {hierarchicalPlan?.layers.map((layer, index) => (
-                <div 
-                  key={index} 
-                  className={`layer-item ${
-                    index < currentLayer ? 'completed' : 
-                    index === currentLayer ? 'current' : 'pending'
-                  }`}
-                >
-                  <div className="layer-status">
-                    {index < currentLayer ? '✅' : 
-                     index === currentLayer ? '🔧' : '⏳'}
-                  </div>
-                  <div className="layer-info">
-                    <div className="layer-name">{layer.name}</div>
-                    <div className="layer-description">{layer.description}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* 채팅 기록 */}
+        {/* 진행 상황은 이제 채팅 버블로 표시됩니다 */}
+
         <div className="chat-history">
-          {chatHistory.map((chat, messageIndex) => {
-            // 현재 메시지가 몇 번째 HTML 히스토리인지 계산
-            let htmlHistoryIndex = -1;
-            if (chat.htmlContent) {
-              htmlHistoryIndex = 0;
-              for (let i = 0; i < messageIndex; i++) {
-                if (chatHistory[i] && chatHistory[i].htmlContent) {
-                  htmlHistoryIndex++;
-                }
-              }
-            }
-            
-            const isCurrentlyViewing = chat.htmlContent && htmlHistoryIndex === currentHistoryIndex;
-            
-            return (
-              <div 
-                key={messageIndex} 
-                className={`chat-message ${chat.type} ${chat.htmlContent ? 'clickable' : ''} ${isCurrentlyViewing ? 'currently-viewing' : ''}`}
-                onClick={() => chat.htmlContent && handleHistoryClick(messageIndex, chat.htmlContent)}
-              >
-                <div className="chat-header">
-                  <span className="chat-sender">
-                    {chat.type === 'user' ? '👤 사용자' : 
-                     chat.type === 'assistant' ? '🤖 AI' : '⚠️ 시스템'}
-                  </span>
-                  <span className="chat-time">
-                    {chat.timestamp.toLocaleTimeString()}
-                  </span>
-                  <div className="history-controls">
-                    {chat.htmlContent && (
-                      <>
-                        <span className="history-indicator">
-                          {isCurrentlyViewing ? '👁️ 현재 보기' : '🔍 클릭하여 보기'}
-                        </span>
-                        <button
-                          className="btn-regenerate-specific"
-                          onClick={(e) => {
-                            e.stopPropagation(); // 메시지 클릭 이벤트 방지
-                            regenerateSpecificMessage(messageIndex);
-                          }}
-                          disabled={isLoading}
-                          title="이 결과를 원본 요청과 컨텍스트로 다시 생성합니다"
-                        >
-                          🔄
-                        </button>
-                      </>
-                    )}
+          {chatHistory.map((item, index) => (
+            <div 
+              key={index} 
+              className={`chat-message ${item.type} ${
+                item.type === 'assistant' && (item.htmlContent || item.previewUrl) ? 'clickable' : ''
+              } ${currentViewIndex === index ? 'currently-viewing' : ''} ${
+                item.isModificationPlan ? 'modification-plan' : ''
+              } ${
+                item.isProgressUpdate ? 'progress-update' : ''
+              } ${
+                item.isPlanProgress ? 'plan-progress' : ''
+              }`}
+              onClick={() => handleChatItemClick(item, index)}
+            >
+              <div className="chat-header">
+                <span className="chat-sender">
+                  {item.type === 'user' ? '사용자' : 
+                   item.type === 'assistant' ? 'AI' : '시스템'}
+                </span>
+                <span className="chat-time">{item.timestamp}</span>
+                {item.type === 'assistant' && item.previewUrl && (
+                  <div className="chat-actions">
+                    <button
+                      className="btn-download"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownload(item);
+                      }}
+                      title="다운로드"
+                    >
+                      💾
+                    </button>
                   </div>
-                </div>
-                <div className="chat-content">{chat.content}</div>
+                )}
               </div>
-            );
-          })}
-          <div ref={chatEndRef} />
+              <div className="chat-content">
+                {item.content}
+                {item.generationType && (
+                  <div className={`history-indicator ${item.generationType}-indicator`}>
+                    {item.generationType === 'multi' && `멀티 페이지 (${item.progress?.total || 0}개 페이지)`}
+                    {item.generationType === 'long' && `긴 페이지 (${item.progress?.total || 0}개 섹션)`}
+                    {item.generationType === 'hierarchical' && `계층적 생성 (${item.progress?.total || 0}개 레이어)`}
+                  </div>
+                )}
+                {item.isModificationPlan && (
+                  <div className="modification-plan-indicator">
+                    🔧 수정 계획
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* 수정 요청 입력 (페이지가 있을 때만 표시) */}
-        {htmlCode && !isHierarchicalGeneration && (
-          <div className="modify-section">
-            <textarea
-              className="modify-input"
-              placeholder="수정 요청을 입력하세요 (예: 배경색을 파란색으로 바꿔줘, 글씨 크기를 크게 해줘)"
-              value={currentRequest}
-              onChange={e => setCurrentRequest(e.target.value)}
-              disabled={isLoading}
-              rows={3}
-            />
-            <button
-              className="btn-modify"
-              onClick={modifyPage}
-              disabled={isLoading || !currentRequest.trim()}
-            >
-              {isModifying ? '수정 중...' : '페이지 수정'}
-            </button>
-          </div>
+        <div className="chat-input-section">
+          <textarea
+            className="chat-input"
+            placeholder={
+              isGenerating ? '작업이 진행 중입니다...' :
+              htmlContent ? '웹사이트를 어떻게 개선할까요? (예: 색상을 더 밝게, 레이아웃 변경 등)' :
+              '원하는 웹페이지를 설명해주세요... (예: 모던한 포트폴리오 사이트)'
+            }
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            disabled={isGenerating}
+          />
+          <button 
+            className="btn-send" 
+            onClick={handleSend}
+            disabled={!chatInput.trim() || isGenerating}
+          >
+            {isGenerating ? 
+              (htmlContent && isModificationRef.current ? '재생성 중...' : '생성 중...') : 
+              '전송'
+            }
+          </button>
+        </div>
+
+        {status && (
+          <div className="status">{status}</div>
         )}
 
-        <div className="status">
-          {isLoading
-            ? `${isHierarchicalGeneration ? `계층 ${currentLayer + 1}/${totalLayers} 생성` : isModifying ? '수정' : '생성'} 중… 받은 문자 수: ${charCount}`
-            : htmlCode
-              ? `✅ 완료! (${htmlCode.length} 문자)`
-              : ''}
-        </div>
-
-        {/* 디버깅 정보 */}
-        {htmlCode && (
-          <div className="debug-info">
-            <details>
-              <summary>HTML 코드 미리보기 (클릭하여 펼치기)</summary>
-              <pre style={{
-                fontSize: '10px',
-                maxHeight: '200px',
-                overflow: 'auto',
-                background: 'rgba(255,255,255,0.1)',
-                padding: '8px',
-                borderRadius: '4px',
-                whiteSpace: 'pre-wrap'
-              }}>
-                {htmlCode.substring(0, 1000)}
-                {htmlCode.length > 1000 ? '\n...(더 많은 내용)' : ''}
-              </pre>
-            </details>
-            
-            {/* 이미지 수정 버튼 */}
-            {(htmlCode.includes('source.unsplash.com') || htmlCode.includes('via.placeholder.com') || htmlCode.includes('picsum.photos')) && (
-              <button 
-                className="btn-fix-images"
-                onClick={() => {
-                  const fixedHtml = fixBrokenImages(htmlCode);
-                  setHtmlCode(fixedHtml);
-                  addToChatHistory('assistant', '🗑️ 관련 없는 이미지를 제거하여 더 깔끔한 레이아웃으로 만들었습니다!', new Date(), fixedHtml);
-                }}
-                style={{
-                  marginTop: '8px',
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  background: '#ff6b6b',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-              >
-                🗑️ 무관한 이미지 제거하기
-              </button>
+        {previewUrl && (
+          <div className="preview-link">
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer">
+              새 창에서 미리보기 →
+            </a>
+            {iframeError && (
+              <div className="iframe-error-notice">
+                iframe 로드 실패. 새 창에서 확인해주세요.
+              </div>
             )}
           </div>
         )}
 
-        {/* 미리보기 링크 */}
-        {getCurrentPreviewId() && (
-          <div className="preview-link">
-            👉&nbsp;
-            <a
-              href={`${API_BASE}/preview/${getCurrentPreviewId()}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {(() => {
-                const isLatest = currentHistoryIndex === htmlHistory.length - 1;
-                if (isLatest || currentHistoryIndex < 0) {
-                  return '최신 결과물 전체보기';
-                } else {
-                  return `이전 결과물 전체보기 (${currentHistoryIndex + 1}/${htmlHistory.length})`;
-                }
-              })()}
-            </a>
+        {showDebug && (
+          <div className="debug-info">
+            <details>
+              <summary>세션 정보</summary>
+              <pre>{JSON.stringify({
+                isGenerating,
+                projectId,
+                currentProjectId: currentProjectIdRef.current,
+                currentPageId: currentPageIdRef.current,
+                isModification: isModificationRef.current,
+                isExecutingPlan: isExecutingPlanRef.current,
+                currentProgress,
+                chatHistoryLength: chatHistory.length,
+                htmlLength: htmlContent.length,
+                generatedChars,
+                hasGenerationPlan: !!generationPlan,
+                previewUrl,
+                iframeError
+              }, null, 2)}</pre>
+            </details>
           </div>
         )}
       </div>
 
-      {/* 리사이저 바 */}
-      <div className="resizer-bar" onMouseDown={startResize} />
+      <div 
+        ref={resizeRef}
+        className="resizer-bar"
+        onMouseDown={handleMouseDown}
+      />
 
-      {/* 오른쪽 프리뷰 패널 */}
-      <div className="panel preview-panel" style={{ width: `${100 - leftWidth}%` }}>
-        {isLoading && !htmlCode && (
+      <div className="panel preview-panel" style={{ width: `${100 - leftPanelWidth}%` }}>
+        {isGenerating && (
           <div className="spinner-overlay">
-            <div className="spinner" />
+            <div className="spinner"></div>
             <div className="spinner-text">
-              {isHierarchicalGeneration 
-                ? `계층 ${currentLayer + 1}/${totalLayers} 생성 중...` 
-                : isModifying ? '페이지를 수정하고 있습니다...' : '페이지를 생성하고 있습니다...'}
+              {workStatus.currentWork}
+              {generatedChars > 0 && (
+                <div>{generatedChars.toLocaleString()}자 생성됨</div>
+              )}
             </div>
           </div>
         )}
-        {!htmlCode && !isLoading && (
-          <div className="empty-preview">
-            <div className="empty-preview-content">
-              <h2>🎨 AI Web Builder</h2>
-              <p>왼쪽에 원하는 웹사이트를 설명해주세요.</p>
-              <p>AI가 실시간으로 HTML/CSS 코드를 생성합니다.</p>
-              <div className="feature-highlight">
-                <h3>✨ 새로운 기능</h3>
-                <p><strong>계층적 생성:</strong> 복잡한 웹사이트를 여러 단계로 나누어 안정적으로 생성</p>
-                <p><strong>무제한 길이:</strong> 대규모 웹사이트도 문제없이 생성 가능</p>
-              </div>
-            </div>
-          </div>
-        )}
-        <iframe
-          title="AI Preview"
-          src={currentBlobUrl || 'about:blank'}
-          sandbox="allow-scripts allow-same-origin allow-forms"
-          style={{ 
-            display: 'block',
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            opacity: htmlCode ? 1 : 0.3,
-            transition: 'opacity 0.4s ease-in-out'
-          }}
-          onLoad={() => {
-            if (currentBlobUrl) {
-              addDebugLog('success', 'iframe 로드 완료');
-            }
-          }}
-          onError={(e) => {
-            addDebugLog('error', 'iframe 로드 오류', e);
-          }}
-        />
-        {/* 생성 중일 때 진행률 표시 */}
-        {isLoading && htmlCode && (
+        
+        {generatedChars > 0 && isGenerating && (
           <div className="generation-progress">
             <div className="progress-bar">
-              <div className="progress-text">
-                {isHierarchicalGeneration 
-                  ? `계층 ${currentLayer + 1}/${totalLayers} 생성 중...` 
-                  : isModifying ? '수정 중...' : '생성 중...'} ({charCount} 문자)
+              <span className="progress-text">
+                {generatedChars.toLocaleString()}자 생성 중...
+              </span>
+            </div>
+          </div>
+        )}
+        
+        {!previewUrl && !isGenerating ? (
+          <div className="empty-preview">
+            <div className="empty-preview-content">
+              <h2>Only Idea</h2>
+              <p>왼쪽 패널에서 원하는 웹페이지를 설명하면</p>
+              <p>AI가 즉시 HTML을 생성해드립니다.</p>
+              
+              <div className="feature-highlight">
+                <h3>✨ 주요 기능</h3>
+                <p>• 자동으로 최적의 생성 전략 선택</p>
+                <p>• 단일 페이지부터 멀티 페이지까지</p>
+                <p>• 긴 문서도 섹션별로 생성</p>
+                <p>• 복잡한 디자인은 계층적 생성</p>
+                <p>• 생성된 페이지 대화형 재생성</p>
+                <p>• 💾 생성된 웹사이트 다운로드</p>
               </div>
             </div>
           </div>
+        ) : (
+          <>
+            <iframe
+              ref={iframeRef}
+              title="Preview"
+              // sandbox 속성 제거 - iframe 내부 네비게이션을 완전히 허용
+              // 보안을 위해 나중에 필요한 최소한의 권한만 추가 가능
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                border: 'none',
+                display: previewUrl ? 'block' : 'none'
+              }}
+              onLoad={(e) => {
+                const iframe = e.target;
+                log.debug('iframe onLoad 이벤트', {
+                  src: iframe.src,
+                  readyState: iframe.contentDocument?.readyState
+                });
+                
+                // iframe 내부 디버깅 설정
+                try {
+                  const iframeWindow = iframe.contentWindow;
+                  if (iframeWindow) {
+                    // 에러 이벤트 캡처
+                    iframeWindow.addEventListener('error', (error) => {
+                      log.error('iframe 내부 JavaScript 에러:', {
+                        message: error.message,
+                        filename: error.filename,
+                        lineno: error.lineno,
+                        colno: error.colno
+                      });
+                    });
+                    
+                    // 콘솔 로그 캡처
+                    const originalConsole = iframeWindow.console;
+                    ['log', 'warn', 'error'].forEach(method => {
+                      iframeWindow.console[method] = function(...args) {
+                        log.debug(`iframe console.${method}:`, args);
+                        originalConsole[method].apply(originalConsole, args);
+                      };
+                    });
+                    
+                    // 클릭 이벤트 모니터링
+                    iframeWindow.document.addEventListener('click', (e) => {
+                      const target = e.target;
+                      if (target.tagName === 'A' || target.tagName === 'BUTTON') {
+                        log.debug('iframe 내부 클릭 이벤트:', {
+                          tagName: target.tagName,
+                          href: target.href,
+                          onclick: target.onclick ? 'defined' : 'undefined',
+                          innerText: target.innerText
+                        });
+                      }
+                    });
+                  }
+                } catch (error) {
+                  log.warn('iframe 디버깅 설정 실패:', error);
+                }
+              }}
+              onError={(e) => {
+                log.error('iframe onError 이벤트', e);
+              }}
+            />
+            {iframeError && previewUrl && (
+              <div className="iframe-error-fallback">
+                <h3>미리보기를 로드할 수 없습니다</h3>
+                <p>아래 버튼을 클릭하여 새 창에서 확인하세요.</p>
+                <button 
+                  className="btn-open-preview"
+                  onClick={() => {
+                    // 개발 환경에서는 Express 서버(4000번 포트)로 직접 열기
+                    const isDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+                    const url = isDev ? `http://localhost:4000${previewUrl}` : previewUrl;
+                    window.open(url, '_blank');
+                  }}
+                >
+                  새 창에서 열기
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
+
+export default App;
