@@ -36,6 +36,18 @@ export const getEventSourceUrl = (endpoint) => {
 // Preview URL 생성 헬퍼
 export const getPreviewUrl = (path) => {
   // preview는 항상 서버에서 처리되어야 함
-  const serverUrl = API_BASE_URL || '';
-  return `${serverUrl}${path}`;
+  // 배포 환경에서는 VITE_API_URL이 필수
+  if (import.meta.env.PROD && !API_BASE_URL) {
+    console.error('[CONFIG] Production environment requires VITE_API_URL to be set');
+  }
+  
+  // API_BASE_URL이 설정되어 있으면 사용, 없으면 현재 origin 사용 (개발 환경)
+  const baseUrl = API_BASE_URL || window.location.origin;
+  
+  // baseUrl이 이미 전체 URL이면 그대로 사용, 아니면 현재 origin과 결합
+  const fullBaseUrl = baseUrl.startsWith('http') ? baseUrl : `${window.location.origin}${baseUrl}`;
+  
+  console.log('[CONFIG] Preview URL generation:', { path, baseUrl, fullBaseUrl });
+  
+  return `${fullBaseUrl}${path}`;
 };

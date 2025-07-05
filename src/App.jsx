@@ -1221,20 +1221,16 @@ function App() {
     
     setTimeout(() => {
       if (iframeRef.current) {
-        let fullUrl;
-        if (url.startsWith('http')) {
-          fullUrl = url;
-        } else if (import.meta.env.DEV) {
-          fullUrl = `${window.location.origin}${url}`;
-        } else {
-          fullUrl = `${window.location.origin}${url}`;
-        }
+        // URL이 이미 완전한 URL인 경우 그대로 사용
+        // 그렇지 않으면 이미 getPreviewUrl을 통해 생성된 URL이므로 그대로 사용
+        const fullUrl = url.startsWith('http') ? url : url;
         
         log.info('iframe src 설정', { 
           url,
           fullUrl,
-          origin: window.location.origin,
-          isDev: import.meta.env.DEV
+          apiBaseUrl: getApiEndpoint(''),
+          isDev: import.meta.env.DEV,
+          isProd: import.meta.env.PROD
         });
         
         iframeRef.current.src = fullUrl;
