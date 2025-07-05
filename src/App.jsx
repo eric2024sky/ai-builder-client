@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { getApiEndpoint, getEventSourceUrl, getPreviewUrl } from './config';
+import logger, { fetchWithLogging } from './services/logger';
 import './App.css';
 
 function App() {
@@ -48,26 +49,34 @@ function App() {
   const isModificationRef = useRef(false);
   const isExecutingPlanRef = useRef(false);
 
+  // 새로운 로거 사용
   const log = {
     info: (message, data = null) => {
-      console.log(`[INFO] ${message}`, data || '');
+      logger.info(message, data);
       addDebugLog('info', message, data);
     },
     error: (message, data = null) => {
-      console.error(`[ERROR] ${message}`, data || '');
+      logger.error(message, data);
       addDebugLog('error', message, data);
     },
     warn: (message, data = null) => {
-      console.warn(`[WARN] ${message}`, data || '');
+      logger.warn(message, data);
       addDebugLog('warning', message, data);
     },
     debug: (message, data = null) => {
+      logger.debug(message, data);
       if (showDebug) {
-        console.log(`[DEBUG] ${message}`, data || '');
         addDebugLog('debug', message, data);
       }
     }
   };
+
+  // 프로젝트 ID 설정 시 로거에도 전달
+  useEffect(() => {
+    if (projectId) {
+      logger.setProjectId(projectId);
+    }
+  }, [projectId]);
 
   const addDebugLog = (type, message, data = null) => {
     const logEntry = {
@@ -82,7 +91,7 @@ function App() {
 
   const downloadLogs = async () => {
     try {
-      const response = await fetch(getApiEndpoint('/api/logs/download'));
+      const response = await fetchWithLogging(getApiEndpoint('/api/logs/download'));
       if (!response.ok) {
         throw new Error('로그 다운로드 실패');
       }
@@ -188,7 +197,7 @@ function App() {
       const apiUrl = getApiEndpoint('/api/test-connection');
       log.info('API 연결 테스트 시작', { apiUrl });
       
-      const response = await fetch(apiUrl);
+      const response = await fetchWithLogging(apiUrl);
       const data = await response.json();
       
       if (data.success) {
@@ -564,7 +573,7 @@ function App() {
     let projectInfo = null;
     if (projectId || currentProjectIdRef.current) {
       try {
-        const response = await fetch(getApiEndpoint(`/api/project/${projectId || currentProjectIdRef.current}`));
+        const response = await fetchWithLogging(getApiEndpoint(`/api/project/${projectId || currentProjectIdRef.current}`));
         if (response.ok) {
           const data = await response.json();
           projectInfo = data.project;
@@ -647,7 +656,7 @@ function App() {
         });
         
         try {
-          const pageResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/${pageInfo.pageName}`));
+          const pageResponse = await fetchWithLogging(getApiEndpoint(`/api/get-page/${projectInfo.id}/${pageInfo.pageName}`));
           if (!pageResponse.ok) {
             throw new Error(`페이지 로드 실패: ${pageInfo.pageName}`);
           }
@@ -726,7 +735,7 @@ function App() {
       // index 페이지의 HTML을 가져와서 htmlContent 업데이트
       let indexHtml = '';
       try {
-        const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${projectInfo.id}/index`));
+        const indexResponse = await fetchWithLogging(getApiEndpoint(`/api/get-page/${projectInfo.id}/index`));
         if (indexResponse.ok) {
           const indexData = await indexResponse.json();
           indexHtml = indexData.html;
@@ -825,7 +834,7 @@ function App() {
 
   const handleModificationComplete = async (html, prompt, pageInfo, projectId) => {
     try {
-      const saveResponse = await fetch(getApiEndpoint('/api/save'), {
+      const saveResponse = await fetchWithLogging(getApiEndpoint('/api/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -860,7 +869,7 @@ function App() {
 
       const plan = currentPlanRef.current;
       
-      const saveResponse = await fetch(getApiEndpoint('/api/save'), {
+      const saveResponse = await fetchWithLogging(getApiEndpoint('/api/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -984,7 +993,7 @@ function App() {
           const isLastPage = config.pageIndex === plan.plan.pages.length - 1;
           if (isLastPage) {
             try {
-              const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalProjectId}/index`));
+              const indexResponse = await fetchWithLogging(getApiEndpoint(`/api/get-page/${finalProjectId}/index`));
               if (indexResponse.ok) {
                 const indexData = await indexResponse.json();
                 setHtmlContent(indexData.html);
@@ -1117,7 +1126,7 @@ function App() {
         
         // 멀티페이지 생성 완료 시 index HTML 가져오기
         try {
-          const indexResponse = await fetch(getApiEndpoint(`/api/get-page/${finalId}/index`));
+          const indexResponse = await fetchWithLogging(getApiEndpoint(`/api/get-page/${finalId}/index`));
           if (indexResponse.ok) {
             const indexData = await indexResponse.json();
             multiPageIndexHtml = indexData.html;
